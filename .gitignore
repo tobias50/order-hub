@@ -1,0 +1,5 @@
+.DS_Store
+node_modules/
+*.zip
+scripts/.env
+Nordic order hub/

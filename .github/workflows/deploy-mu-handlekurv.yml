@@ -1,0 +1,33 @@
+name: Deploy MU plugins
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "mu-plugins/**"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required vars
+        run: |
+          test -n "${{ vars.ORDERHUB_SSH_USER }}"
+          test -n "${{ vars.ORDERHUB_WEB_ROOT }}"
+
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SERVEBOLT_SSH_KEY }}
+
+      - name: Add server host key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p 22 angelo-osl.servebolt.cloud >> ~/.ssh/known_hosts
+
+      - name: Deploy MU plugins
+        run: |
+          rsync -avz --delete -e "ssh -p 22" --chmod=F644,D755 "mu-plugins/" "${{ vars.ORDERHUB_SSH_USER }}@angelo-osl.servebolt.cloud:${{ vars.ORDERHUB_WEB_ROOT }}/wp-content/mu-plugins/"
