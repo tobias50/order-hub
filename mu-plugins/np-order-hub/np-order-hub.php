@@ -37,6 +37,7 @@ define('NP_ORDER_HUB_HELP_SCOUT_CLIENT_ID_OPTION', 'np_order_hub_help_scout_clie
 define('NP_ORDER_HUB_HELP_SCOUT_CLIENT_SECRET_OPTION', 'np_order_hub_help_scout_client_secret');
 define('NP_ORDER_HUB_HELP_SCOUT_REFRESH_TOKEN_OPTION', 'np_order_hub_help_scout_refresh_token');
 define('NP_ORDER_HUB_HELP_SCOUT_EXPIRES_AT_OPTION', 'np_order_hub_help_scout_expires_at');
+define('NP_ORDER_HUB_CONNECTOR_SETUP_KEY_OPTION', 'np_order_hub_connector_setup_key');
 
 function np_order_hub_table_name() {
     global $wpdb;
@@ -96,6 +97,88 @@ function np_order_hub_get_store_by_key($store_key) {
 
 function np_order_hub_save_stores($stores) {
     update_option(NP_ORDER_HUB_OPTION_STORES, $stores);
+}
+
+function np_order_hub_get_connector_setup_key($generate_if_missing = false) {
+    $key = trim((string) get_option(NP_ORDER_HUB_CONNECTOR_SETUP_KEY_OPTION, ''));
+    if ($key === '' && $generate_if_missing) {
+        $key = wp_generate_password(48, false, false);
+        update_option(NP_ORDER_HUB_CONNECTOR_SETUP_KEY_OPTION, $key, false);
+    }
+    return $key;
+}
+
+function np_order_hub_store_upsert($data) {
+    $stores = np_order_hub_get_stores();
+
+    $key = sanitize_key((string) ($data['key'] ?? ''));
+    $name = sanitize_text_field((string) ($data['name'] ?? ''));
+    $url = esc_url_raw((string) ($data['url'] ?? ''));
+    $secret = trim((string) ($data['secret'] ?? ''));
+    $token = sanitize_text_field((string) ($data['token'] ?? ''));
+    $consumer_key = sanitize_text_field((string) ($data['consumer_key'] ?? ''));
+    $consumer_secret = sanitize_text_field((string) ($data['consumer_secret'] ?? ''));
+    $packing_slip_url = np_order_hub_sanitize_url_template((string) ($data['packing_slip_url'] ?? ''));
+    $order_url_type = sanitize_key((string) ($data['order_url_type'] ?? NP_ORDER_HUB_DEFAULT_ORDER_URL_TYPE));
+    $order_url_type = $order_url_type === 'hpos' ? 'hpos' : 'legacy';
+    $delivery_bucket = np_order_hub_normalize_delivery_bucket((string) ($data['delivery_bucket'] ?? 'standard'));
+    $switch_date_raw = sanitize_text_field((string) ($data['delivery_bucket_switch_date'] ?? ''));
+    $delivery_bucket_switch_date = preg_match('/^\d{4}-\d{2}-\d{2}$/', $switch_date_raw) ? $switch_date_raw : '';
+    $delivery_bucket_after = np_order_hub_normalize_delivery_bucket_optional((string) ($data['delivery_bucket_after'] ?? ''));
+
+    if ($key === '' || $name === '' || $url === '' || $secret === '') {
+        return new WP_Error('missing_fields', 'Store key, name, url and secret are required.');
+    }
+
+    $stores[$key] = array(
+        'key' => $key,
+        'name' => $name,
+        'url' => $url,
+        'normalized_url' => np_order_hub_normalize_store_url($url),
+        'secret' => $secret,
+        'token' => $token,
+        'consumer_key' => $consumer_key,
+        'consumer_secret' => $consumer_secret,
+        'packing_slip_url' => $packing_slip_url,
+        'order_url_type' => $order_url_type,
+        'delivery_bucket' => $delivery_bucket,
+        'delivery_bucket_switch_date' => $delivery_bucket_switch_date,
+        'delivery_bucket_after' => $delivery_bucket_after,
+    );
+
+    np_order_hub_save_stores($stores);
+    return $stores[$key];
+}
+
+function np_order_hub_rest_store_connect(WP_REST_Request $request) {
+    $configured_key = np_order_hub_get_connector_setup_key(false);
+    if ($configured_key === '') {
+        return new WP_REST_Response(array('error' => 'setup_key_missing'), 503);
+    }
+
+    $provided_key = trim((string) $request->get_header('x-np-order-hub-setup-key'));
+    if ($provided_key === '') {
+        $provided_key = trim((string) $request->get_param('setup_key'));
+    }
+    if ($provided_key === '' || !hash_equals($configured_key, $provided_key)) {
+        return new WP_REST_Response(array('error' => 'unauthorized'), 401);
+    }
+
+    $body = json_decode((string) $request->get_body(), true);
+    $payload = is_array($body) ? $body : array();
+    if (empty($payload)) {
+        $payload = $request->get_params();
+    }
+
+    $upsert = np_order_hub_store_upsert($payload);
+    if (is_wp_error($upsert)) {
+        return new WP_REST_Response(array('error' => $upsert->get_error_message()), 400);
+    }
+
+    return new WP_REST_Response(array(
+        'ok' => true,
+        'store' => $upsert,
+    ), 200);
 }
 
 function np_order_hub_normalize_store_url($url) {
@@ -932,6 +1015,11 @@ function np_order_hub_register_routes() {
     register_rest_route('np-order-hub/v1', '/webhook', array(
         'methods' => 'POST',
         'callback' => 'np_order_hub_handle_webhook',
+        'permission_callback' => '__return_true',
+    ));
+    register_rest_route('np-order-hub/v1', '/store-connect', array(
+        'methods' => 'POST',
+        'callback' => 'np_order_hub_rest_store_connect',
         'permission_callback' => '__return_true',
     ));
 }
@@ -5614,6 +5702,26 @@ function np_order_hub_stores_page() {
 
     $stores = np_order_hub_get_stores();
     $edit_store = null;
+    $connector_setup_key = np_order_hub_get_connector_setup_key(true);
+
+    if (!empty($_POST['np_order_hub_connector_setup_action'])) {
+        check_admin_referer('np_order_hub_connector_setup_key');
+        $action = sanitize_key((string) $_POST['np_order_hub_connector_setup_action']);
+        if ($action === 'regenerate') {
+            $connector_setup_key = wp_generate_password(48, false, false);
+            update_option(NP_ORDER_HUB_CONNECTOR_SETUP_KEY_OPTION, $connector_setup_key, false);
+            echo '<div class="updated"><p>Connector setup key regenerated.</p></div>';
+        } elseif ($action === 'save') {
+            $candidate = trim((string) ($_POST['np_order_hub_connector_setup_key'] ?? ''));
+            if ($candidate === '') {
+                echo '<div class="error"><p>Connector setup key cannot be empty.</p></div>';
+            } else {
+                $connector_setup_key = $candidate;
+                update_option(NP_ORDER_HUB_CONNECTOR_SETUP_KEY_OPTION, $connector_setup_key, false);
+                echo '<div class="updated"><p>Connector setup key saved.</p></div>';
+            }
+        }
+    }
 
     if (!empty($_POST['np_order_hub_update_store'])) {
         check_admin_referer('np_order_hub_update_store');
@@ -5635,27 +5743,8 @@ function np_order_hub_stores_page() {
 
         if (!$existing) {
             echo '<div class="error"><p>Store not found.</p></div>';
-        } elseif ($key !== '' && $name !== '' && $url !== '' && $secret !== '') {
-            $stores[$key] = array(
-                'key' => $key,
-                'name' => $name,
-                'url' => $url,
-                'normalized_url' => np_order_hub_normalize_store_url($url),
-                'secret' => $secret,
-                'token' => $token,
-                'consumer_key' => $consumer_key,
-                'consumer_secret' => $consumer_secret,
-                'packing_slip_url' => $packing_slip_url,
-                'order_url_type' => $type,
-                'delivery_bucket' => $delivery_bucket,
-                'delivery_bucket_switch_date' => $delivery_bucket_switch_date,
-                'delivery_bucket_after' => $delivery_bucket_after,
-            );
-            np_order_hub_save_stores($stores);
-            $edit_store = $stores[$key];
-            echo '<div class="updated"><p>Store updated.</p></div>';
         } else {
-            $edit_store = array(
+            $upsert = np_order_hub_store_upsert(array(
                 'key' => $key,
                 'name' => $name,
                 'url' => $url,
@@ -5668,8 +5757,28 @@ function np_order_hub_stores_page() {
                 'delivery_bucket' => $delivery_bucket,
                 'delivery_bucket_switch_date' => $delivery_bucket_switch_date,
                 'delivery_bucket_after' => $delivery_bucket_after,
-            );
-            echo '<div class="error"><p>All fields are required.</p></div>';
+            ));
+            if (is_wp_error($upsert)) {
+                $edit_store = array(
+                    'key' => $key,
+                    'name' => $name,
+                    'url' => $url,
+                    'secret' => $secret,
+                    'token' => $token,
+                    'consumer_key' => $consumer_key,
+                    'consumer_secret' => $consumer_secret,
+                    'packing_slip_url' => $packing_slip_url,
+                    'order_url_type' => $type,
+                    'delivery_bucket' => $delivery_bucket,
+                    'delivery_bucket_switch_date' => $delivery_bucket_switch_date,
+                    'delivery_bucket_after' => $delivery_bucket_after,
+                );
+                echo '<div class="error"><p>' . esc_html($upsert->get_error_message()) . '</p></div>';
+            } else {
+                $stores = np_order_hub_get_stores();
+                $edit_store = $upsert;
+                echo '<div class="updated"><p>Store updated.</p></div>';
+            }
         }
     }
 
@@ -5690,26 +5799,26 @@ function np_order_hub_stores_page() {
         $delivery_bucket_switch_date = preg_match('/^\d{4}-\d{2}-\d{2}$/', $switch_date_raw) ? $switch_date_raw : '';
         $delivery_bucket_after = np_order_hub_normalize_delivery_bucket_optional((string) ($_POST['delivery_bucket_after'] ?? ''));
 
-        if ($key !== '' && $name !== '' && $url !== '' && $secret !== '') {
-            $stores[$key] = array(
-                'key' => $key,
-                'name' => $name,
-                'url' => $url,
-                'normalized_url' => np_order_hub_normalize_store_url($url),
-                'secret' => $secret,
-                'token' => $token,
-                'consumer_key' => $consumer_key,
-                'consumer_secret' => $consumer_secret,
-                'packing_slip_url' => $packing_slip_url,
-                'order_url_type' => $type,
-                'delivery_bucket' => $delivery_bucket,
-                'delivery_bucket_switch_date' => $delivery_bucket_switch_date,
-                'delivery_bucket_after' => $delivery_bucket_after,
-            );
-            np_order_hub_save_stores($stores);
-            echo '<div class="updated"><p>Store saved.</p></div>';
+        $upsert = np_order_hub_store_upsert(array(
+            'key' => $key,
+            'name' => $name,
+            'url' => $url,
+            'secret' => $secret,
+            'token' => $token,
+            'consumer_key' => $consumer_key,
+            'consumer_secret' => $consumer_secret,
+            'packing_slip_url' => $packing_slip_url,
+            'order_url_type' => $type,
+            'delivery_bucket' => $delivery_bucket,
+            'delivery_bucket_switch_date' => $delivery_bucket_switch_date,
+            'delivery_bucket_after' => $delivery_bucket_after,
+        ));
+
+        if (is_wp_error($upsert)) {
+            echo '<div class="error"><p>' . esc_html($upsert->get_error_message()) . '</p></div>';
         } else {
-            echo '<div class="error"><p>All fields are required.</p></div>';
+            $stores = np_order_hub_get_stores();
+            echo '<div class="updated"><p>Store saved.</p></div>';
         }
     }
 
@@ -5734,6 +5843,16 @@ function np_order_hub_stores_page() {
 
     echo '<div class="wrap">';
     echo '<h1>Order Hub Stores</h1>';
+
+    echo '<h2>Connector setup</h2>';
+    echo '<p>Use this key in school network to auto-connect stores to Order Hub.</p>';
+    echo '<form method="post" style="margin:12px 0 24px;">';
+    wp_nonce_field('np_order_hub_connector_setup_key');
+    echo '<input type="text" name="np_order_hub_connector_setup_key" class="regular-text" value="' . esc_attr($connector_setup_key) . '" />';
+    echo '<button type="submit" class="button button-primary" name="np_order_hub_connector_setup_action" value="save" style="margin-left:8px;">Save key</button>';
+    echo '<button type="submit" class="button" name="np_order_hub_connector_setup_action" value="regenerate" style="margin-left:8px;">Regenerate key</button>';
+    echo '<p class="description">Endpoint: <code>' . esc_html(rest_url('np-order-hub/v1/store-connect')) . '</code></p>';
+    echo '</form>';
 
     echo '<table class="widefat striped">';
     echo '<thead><tr>';
