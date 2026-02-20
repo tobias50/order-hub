@@ -1103,9 +1103,10 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
     );
     $existing_id = $existing ? (int) $existing['id'] : 0;
     $existing_bucket = $existing ? np_order_hub_extract_delivery_bucket_from_payload_data($existing['payload']) : '';
-    $incoming_bucket = np_order_hub_extract_delivery_bucket_from_payload_data($data);
     $store_bucket = np_order_hub_get_active_store_delivery_bucket($store);
-    $bucket_to_set = $existing_bucket !== '' ? $existing_bucket : ($incoming_bucket !== '' ? $incoming_bucket : $store_bucket);
+    // Delivery bucket styres kun fra hubens butikk-innstillinger.
+    // Eksisterende ordre beholder tidligere bucket, nye ordre får aktiv butikk-bucket.
+    $bucket_to_set = $existing_bucket !== '' ? $existing_bucket : $store_bucket;
     $data[NP_ORDER_HUB_DELIVERY_BUCKET_KEY] = $bucket_to_set;
 
     $record = array(
@@ -1301,7 +1302,9 @@ function np_order_hub_get_active_store_delivery_bucket($store) {
 
     if ($switch_date !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $switch_date)) {
         $today = current_time('Y-m-d');
-        if ($today >= $switch_date) {
+        // "Bytt dato" tolkes som "gjelder til og med denne datoen".
+        // Bytte skjer fra og med dagen etter.
+        if ($today > $switch_date) {
             if ($switch_bucket === '') {
                 $switch_bucket = $default_bucket === 'standard' ? NP_ORDER_HUB_DELIVERY_BUCKET_SCHEDULED : 'standard';
             }
@@ -5896,7 +5899,7 @@ function np_order_hub_stores_page() {
                     $after_bucket = $store_bucket === 'standard' ? NP_ORDER_HUB_DELIVERY_BUCKET_SCHEDULED : 'standard';
                 }
                 $after_label = $after_bucket === NP_ORDER_HUB_DELIVERY_BUCKET_SCHEDULED ? 'Levering til bestemt dato' : 'Levering 3-5 dager';
-                $bucket_note = ' (fra ' . $switch_date . ' → ' . $after_label . ')';
+                $bucket_note = ' (etter ' . $switch_date . ' → ' . $after_label . ')';
             }
             echo '<td>' . esc_html($bucket_label . $bucket_note) . '</td>';
             $token_label = !empty($store['token']) ? 'Configured' : '—';
@@ -5966,9 +5969,9 @@ function np_order_hub_stores_page() {
     echo '<option value="scheduled"' . selected($delivery_bucket_value, 'scheduled', false) . '>Levering til bestemt dato</option>';
     echo '</select>';
     echo '<p class="description">Used to place new orders in the correct dashboard automatically.</p></td></tr>';
-    echo '<tr><th scope="row"><label for="delivery_bucket_switch_date">Bytt dato</label></th>';
+    echo '<tr><th scope="row"><label for="delivery_bucket_switch_date">Bytt etter dato</label></th>';
     echo '<td><input name="delivery_bucket_switch_date" id="delivery_bucket_switch_date" type="date" class="regular-text" value="' . esc_attr($delivery_bucket_switch_date_value) . '" />';
-    echo '<p class="description">Når denne datoen er passert, brukes "Bytt til" for nye ordre.</p></td></tr>';
+    echo '<p class="description">Default gjelder til og med valgt dato. Fra dagen etter brukes "Bytt til".</p></td></tr>';
     echo '<tr><th scope="row"><label for="delivery_bucket_after">Bytt til</label></th>';
     echo '<td><select name="delivery_bucket_after" id="delivery_bucket_after">';
     echo '<option value=""' . selected($delivery_bucket_after_value, '', false) . '>Ingen endring</option>';
