@@ -22,3 +22,9 @@ Required repo secret:
 Required repo variables:
 - `ORDERHUB_SSH_USER`
 - `ORDERHUB_WEB_ROOT`
+
+## Refactor maintenance
+- Split runtime modules after larger edits:
+  - `php scripts/refactor-phase3-split-runtime.php`
+- Run full validation:
+  - `./scripts/refactor-verify-all.sh`

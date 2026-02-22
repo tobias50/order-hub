@@ -43,7 +43,10 @@ If your packing slip link requires an access key, use `{access_key}` and install
 ## WPO access key helper (stores)
 For WPO "Full" access, add this helper plugin on each store so the webhook includes an access key:
 
-1. Copy `np-order-hub-store-wpo.php` to the store's `wp-content/plugins/`.
+1. Copy both:
+   - `np-order-hub-store-wpo.php`
+   - `np-order-hub-store-wpo-refactor/`
+   to the store's `wp-content/plugins/np-order-hub/`.
 2. Activate **NP Order Hub - WPO Access Key**.
 3. Update your hub Packing Slip URL to include `{access_key}`:
    `https://store.com/wp-admin/admin-ajax.php?action=generate_wpo_wcpdf&document_type=packing-slip&order_ids={order_id}&access_key={access_key}`
