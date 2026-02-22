@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nordicprofil.orderhub.print-agent</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/ABSOLUTE/PATH/TO/print-agent-macos.sh</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HUB_BASE_URL</key>
+    <string>https://ordrehub.nordicprofil.no</string>
+    <key>PRINT_TOKEN</key>
+    <string>SET_PRINT_TOKEN_HERE</string>
+    <key>PRINTER_NAME</key>
+    <string>SET_PRINTER_NAME_HERE</string>
+    <key>AGENT_NAME</key>
+    <string>lager-mac-1</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>60</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/orderhub-print-agent.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/orderhub-print-agent.err.log</string>
+</dict>
+</plist>
