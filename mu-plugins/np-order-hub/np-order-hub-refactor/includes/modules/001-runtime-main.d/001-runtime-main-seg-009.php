@@ -70,6 +70,10 @@ function np_order_hub_process_print_job($job_key) {
     if (!is_array($job)) {
         return;
     }
+    $status = isset($job['status']) ? (string) $job['status'] : '';
+    if (in_array($status, array('ready', 'printing', 'completed', 'skipped', 'failed', 'failed_print'), true)) {
+        return;
+    }
 
     $lock_key = 'np_order_hub_print_lock_' . substr(md5($job_key), 0, 20);
     if (get_transient($lock_key)) {

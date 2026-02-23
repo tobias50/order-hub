@@ -227,14 +227,16 @@ function np_order_hub_print_queue_schedule_event($job_key, $run_at_ts) {
     if ($run_at_ts < (time() + 5)) {
         $run_at_ts = time() + 5;
     }
-    $existing = wp_next_scheduled(NP_ORDER_HUB_PRINT_QUEUE_EVENT, array($job_key));
+    $args = array($job_key);
+    $existing = wp_next_scheduled(NP_ORDER_HUB_PRINT_QUEUE_EVENT, $args);
     if ($existing && $existing <= $run_at_ts) {
         return $existing;
     }
-    if ($existing) {
-        wp_unschedule_event($existing, NP_ORDER_HUB_PRINT_QUEUE_EVENT, array($job_key));
+    while ($existing) {
+        wp_unschedule_event($existing, NP_ORDER_HUB_PRINT_QUEUE_EVENT, $args);
+        $existing = wp_next_scheduled(NP_ORDER_HUB_PRINT_QUEUE_EVENT, $args);
     }
-    wp_schedule_single_event($run_at_ts, NP_ORDER_HUB_PRINT_QUEUE_EVENT, array($job_key));
+    wp_schedule_single_event($run_at_ts, NP_ORDER_HUB_PRINT_QUEUE_EVENT, $args);
     return $run_at_ts;
 }
 
