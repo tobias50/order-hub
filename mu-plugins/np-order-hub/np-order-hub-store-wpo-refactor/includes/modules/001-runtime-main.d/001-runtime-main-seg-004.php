@@ -86,6 +86,9 @@ function np_order_hub_wpo_admin_page() {
     $endpoint = rest_url('np-order-hub/v1/packing-slip');
     $bulk_endpoint = rest_url('np-order-hub/v1/packing-slips');
     $status_endpoint = rest_url('np-order-hub/v1/order-status');
+    $order_prefix = function_exists('np_order_hub_wpo_get_order_prefix_for_blog')
+        ? np_order_hub_wpo_get_order_prefix_for_blog(get_current_blog_id())
+        : '';
     $hub_disabled = np_order_hub_wpo_is_hub_disabled();
     $email_disabled = np_order_hub_wpo_is_outgoing_email_disabled();
     $delivery_bucket = np_order_hub_wpo_get_default_delivery_bucket();
@@ -101,6 +104,13 @@ function np_order_hub_wpo_admin_page() {
     echo '<tr><th>Bulk endpoint</th><td><code>' . esc_html($bulk_endpoint) . '</code></td></tr>';
     echo '<tr><th>Bulk example</th><td><code>' . esc_html($bulk_endpoint . '?order_ids=123,124&token=' . $token) . '</code></td></tr>';
     echo '<tr><th>Status endpoint</th><td><code>' . esc_html($status_endpoint) . '</code></td></tr>';
+    echo '<tr><th>Order number format</th><td><code>' . esc_html($order_prefix !== '' ? ($order_prefix . '-{order_id}') : '{order_id}') . '</code>';
+    if ($order_prefix === '') {
+        echo '<p class="description">Root site uses plain order numbers without prefix.</p>';
+    } else {
+        echo '<p class="description">Prefix identifies this subsite in the multisite network.</p>';
+    }
+    echo '</td></tr>';
     echo '</tbody>';
     echo '</table>';
     echo '<form method="post" style="margin-top:16px;">';
