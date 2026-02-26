@@ -64,8 +64,14 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
         $source = (string) $request->get_header('X-WC-Webhook-Source');
         $store = np_order_hub_find_store_by_url($stores, $source);
     }
+    if (!$store && is_array($data)) {
+        $store = np_order_hub_maybe_auto_register_store_from_request($store_key, $request, $data);
+    }
     if (!$store) {
         return new WP_REST_Response(array('error' => 'unknown_store'), 401);
+    }
+    if (is_array($data)) {
+        $store = np_order_hub_maybe_enrich_store_auth_from_payload($store, $data);
     }
 
     np_order_hub_log_hookshot_probe($store_key, $store, $request, $signature, $event, $topic, $data, $body);
@@ -75,12 +81,16 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
         return new WP_REST_Response(array('status' => 'ping'), 200);
     }
 
-    if (empty(np_order_hub_get_store_webhook_secrets($store))) {
-        return new WP_REST_Response(array('error' => 'missing_secret'), 401);
-    }
-    if (!np_order_hub_verify_store_signature($body, $signature, $store)) {
-        $trusted_source_ip = np_order_hub_is_trusted_webhook_source_request($store, $request);
-        $trusted_hookshot_ip = np_order_hub_is_trusted_webhook_ip_request($store, $request);
+    $trusted_source_ip = np_order_hub_is_trusted_webhook_source_request($store, $request);
+    $trusted_hookshot_ip = np_order_hub_is_trusted_webhook_ip_request($store, $request);
+    $has_store_secret = !empty(np_order_hub_get_store_webhook_secrets($store));
+    if (!$has_store_secret) {
+        if (!$trusted_source_ip && !$trusted_hookshot_ip) {
+            return new WP_REST_Response(array('error' => 'missing_secret'), 401);
+        }
+        $reason = $trusted_source_ip ? 'source+ip matched store' : 'hookshot+ip matched store';
+        error_log('[np-order-hub] webhook_missing_secret_bypass ' . $reason);
+    } elseif (!np_order_hub_verify_store_signature($body, $signature, $store)) {
         if (!$trusted_source_ip && !$trusted_hookshot_ip) {
             np_order_hub_log_signature_failure($store, $body, $signature, $request);
             return new WP_REST_Response(array('error' => 'bad_signature'), 401);
@@ -122,6 +132,8 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
         ), array('%s', '%d'));
         return new WP_REST_Response(array('status' => 'deleted'), 200);
     }
+
+    $data = np_order_hub_strip_store_credentials_from_payload($data);
 
     $order_number = isset($data['number']) ? sanitize_text_field((string) $data['number']) : (string) $order_id;
     $status = isset($data['status']) ? sanitize_key((string) $data['status']) : '';

@@ -1,4 +1,42 @@
 <?php
+function np_order_hub_wpo_build_store_key_from_site_url($url = '') {
+    $url = trim((string) $url);
+    if ($url === '') {
+        $url = (string) home_url('/');
+    }
+    $parsed = wp_parse_url($url);
+    $host = isset($parsed['host']) ? strtolower((string) $parsed['host']) : '';
+    $path = isset($parsed['path']) ? trim((string) $parsed['path'], '/') : '';
+    $source = $host;
+    if ($path !== '') {
+        $source .= '_' . $path;
+    }
+    $key = preg_replace('/[^a-z0-9]+/', '_', $source);
+    $key = is_string($key) ? trim($key, '_') : '';
+    return sanitize_key((string) $key);
+}
+
+function np_order_hub_wpo_get_webhook_secret($webhook_id = 0) {
+    $webhook_id = absint($webhook_id);
+    if ($webhook_id < 1 || !class_exists('WC_Webhook')) {
+        return '';
+    }
+    $webhook = new WC_Webhook($webhook_id);
+    if (!$webhook || !is_a($webhook, 'WC_Webhook')) {
+        return '';
+    }
+    if (method_exists($webhook, 'get_status')) {
+        $status = (string) $webhook->get_status();
+        if ($status !== '' && $status !== 'active') {
+            return '';
+        }
+    }
+    if (!method_exists($webhook, 'get_secret')) {
+        return '';
+    }
+    return trim((string) $webhook->get_secret());
+}
+
 function np_order_hub_extract_access_key_from_url($url) {
     $url = (string) $url;
     if ($url === '') {
@@ -137,10 +175,29 @@ function np_order_hub_add_wpo_access_key($payload, $resource, $resource_id, $web
 
     $payload['np_order_hub_delivery_bucket'] = np_order_hub_wpo_get_default_delivery_bucket();
 
+    $store_url = trailingslashit(home_url('/'));
+    $payload['np_order_hub_store_url'] = esc_url_raw($store_url);
+    $payload['np_order_hub_store_name'] = sanitize_text_field((string) get_bloginfo('name'));
+    $payload['np_order_hub_store_key'] = np_order_hub_wpo_build_store_key_from_site_url($store_url);
+
+    if (function_exists('np_order_hub_wpo_get_token')) {
+        $store_token = trim((string) np_order_hub_wpo_get_token());
+        if ($store_token !== '') {
+            $payload['np_order_hub_store_token'] = $store_token;
+        }
+    }
+
+    $webhook_secret = np_order_hub_wpo_get_webhook_secret($webhook_id);
+    if ($webhook_secret !== '') {
+        $payload['np_order_hub_webhook_secret'] = $webhook_secret;
+    }
+
     np_order_hub_wpo_log('webhook_payload_done', array(
         'resource_id' => $resource_id,
         'has_access_key' => $access_key !== '',
         'has_packing_slip_url' => $document_url !== '',
+        'has_store_token' => !empty($payload['np_order_hub_store_token']),
+        'has_webhook_secret' => !empty($payload['np_order_hub_webhook_secret']),
     ));
 
     return $payload;
