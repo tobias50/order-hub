@@ -231,6 +231,16 @@ add_action('admin_menu', 'np_order_hub_admin_menu');
 
 function np_order_hub_admin_menu() {
     $capability = 'manage_options';
+    $standard_processing_count = np_order_hub_get_processing_count_for_bucket('standard');
+    $scheduled_processing_count = np_order_hub_get_processing_count_for_bucket(NP_ORDER_HUB_DELIVERY_BUCKET_SCHEDULED);
+    $standard_menu_title = 'Levering 3-5 dager';
+    if ($standard_processing_count > 0) {
+        $standard_menu_title .= ' <span class="awaiting-mod">' . (int) $standard_processing_count . '</span>';
+    }
+    $scheduled_menu_title = 'Levering til bestemt dato';
+    if ($scheduled_processing_count > 0) {
+        $scheduled_menu_title .= ' <span class="awaiting-mod">' . (int) $scheduled_processing_count . '</span>';
+    }
     add_menu_page(
         'Order Hub',
         'Order Hub',
@@ -240,8 +250,8 @@ function np_order_hub_admin_menu() {
         'dashicons-clipboard',
         56
     );
-    add_submenu_page('np-order-hub', 'Levering 3-5 dager', 'Levering 3-5 dager', $capability, 'np-order-hub-dashboard', 'np_order_hub_dashboard_page');
-    add_submenu_page('np-order-hub', 'Levering til bestemt dato', 'Levering til bestemt dato', $capability, 'np-order-hub-scheduled', 'np_order_hub_dashboard_page');
+    add_submenu_page('np-order-hub', 'Levering 3-5 dager', $standard_menu_title, $capability, 'np-order-hub-dashboard', 'np_order_hub_dashboard_page');
+    add_submenu_page('np-order-hub', 'Levering til bestemt dato', $scheduled_menu_title, $capability, 'np-order-hub-scheduled', 'np_order_hub_dashboard_page');
     add_submenu_page('np-order-hub', 'Omsetning', 'Omsetning', $capability, 'np-order-hub-revenue', 'np_order_hub_revenue_page');
     add_submenu_page('np-order-hub', 'Reklamasjon', 'Reklamasjon', $capability, 'np-order-hub-reklamasjon', 'np_order_hub_reklamasjon_page');
     add_submenu_page('np-order-hub', 'Restordre', 'Restordre', $capability, 'np-order-hub-restordre', 'np_order_hub_restordre_page');

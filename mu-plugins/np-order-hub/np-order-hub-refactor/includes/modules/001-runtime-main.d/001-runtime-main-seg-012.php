@@ -202,6 +202,15 @@ function np_order_hub_query_metric_range($filters, $start_gmt = '', $end_gmt = '
     );
 }
 
+function np_order_hub_get_processing_count_for_bucket($delivery_bucket = 'standard', $store_key = '') {
+    $filters = array(
+        'store' => sanitize_key((string) $store_key),
+        'status' => 'processing',
+    );
+    $result = np_order_hub_query_metric_range($filters, '', '', $delivery_bucket);
+    return isset($result['count']) ? (int) $result['count'] : 0;
+}
+
 function np_order_hub_get_currency_label($filters, $delivery_bucket = 'standard') {
     global $wpdb;
     $table = np_order_hub_table_name();

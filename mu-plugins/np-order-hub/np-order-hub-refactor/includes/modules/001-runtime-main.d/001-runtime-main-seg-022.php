@@ -287,6 +287,10 @@ function np_order_hub_dashboard_page() {
     }
 
     $filters = np_order_hub_get_dashboard_filters($default_status);
+    $processing_count = np_order_hub_get_processing_count_for_bucket(
+        $delivery_bucket,
+        isset($filters['store']) ? (string) $filters['store'] : ''
+    );
     $metric_filters = array(
         'store' => $filters['store'],
         'status' => $filters['status'],
@@ -407,6 +411,10 @@ function np_order_hub_dashboard_page() {
         }
     }
     echo '<h1>' . esc_html($dashboard_title) . '</h1>';
+    $processing_label = isset($filters['store']) && $filters['store'] !== ''
+        ? 'Processing i denne mappa (valgt butikk): '
+        : 'Processing i denne mappa: ';
+    echo '<p class="description" style="margin-top:-6px;margin-bottom:12px;"><strong>' . esc_html($processing_label . (string) $processing_count) . '</strong></p>';
     echo '<style>
         .np-order-hub-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin:16px 0 24px;}
         .np-order-hub-card{padding:16px;}
