@@ -112,12 +112,22 @@ function np_order_hub_store_upsert($data) {
     $url = esc_url_raw((string) ($data['url'] ?? ''));
     $secret = trim((string) ($data['secret'] ?? ''));
     $token = sanitize_text_field((string) ($data['token'] ?? ''));
-    $consumer_key = sanitize_text_field((string) ($data['consumer_key'] ?? ''));
-    $consumer_secret = sanitize_text_field((string) ($data['consumer_secret'] ?? ''));
     $packing_slip_url = np_order_hub_sanitize_url_template((string) ($data['packing_slip_url'] ?? ''));
     $order_url_type = sanitize_key((string) ($data['order_url_type'] ?? NP_ORDER_HUB_DEFAULT_ORDER_URL_TYPE));
     $order_url_type = $order_url_type === 'hpos' ? 'hpos' : 'legacy';
     $existing = isset($stores[$key]) && is_array($stores[$key]) ? $stores[$key] : array();
+    $consumer_key_input = array_key_exists('consumer_key', $data)
+        ? sanitize_text_field((string) $data['consumer_key'])
+        : null;
+    $consumer_secret_input = array_key_exists('consumer_secret', $data)
+        ? sanitize_text_field((string) $data['consumer_secret'])
+        : null;
+    $consumer_key = ($consumer_key_input !== null && $consumer_key_input !== '')
+        ? $consumer_key_input
+        : (isset($existing['consumer_key']) ? sanitize_text_field((string) $existing['consumer_key']) : '');
+    $consumer_secret = ($consumer_secret_input !== null && $consumer_secret_input !== '')
+        ? $consumer_secret_input
+        : (isset($existing['consumer_secret']) ? sanitize_text_field((string) $existing['consumer_secret']) : '');
     $delivery_bucket = np_order_hub_normalize_delivery_bucket((string) ($data['delivery_bucket'] ?? ($existing['delivery_bucket'] ?? 'standard')));
     $switch_date_raw = sanitize_text_field((string) ($data['delivery_bucket_switch_date'] ?? ($existing['delivery_bucket_switch_date'] ?? '')));
     $delivery_bucket_switch_date = preg_match('/^\d{4}-\d{2}-\d{2}$/', $switch_date_raw) ? $switch_date_raw : '';
