@@ -26,26 +26,97 @@ function np_order_hub_wc_response_indicates_missing_order($status_code, $body) {
     return false;
 }
 
-function np_order_hub_sync_deleted_orders($limit = 250) {
+function np_order_hub_check_store_order_exists_via_token($store, $order_id, $timeout = 12) {
+    $order_id = absint($order_id);
+    if ($order_id < 1) {
+        return new WP_Error('missing_order_id', 'Missing order ID.');
+    }
+
+    $token = np_order_hub_get_store_token($store);
+    if ($token === '') {
+        return new WP_Error('missing_store_token', 'Missing store token.');
+    }
+
+    $endpoint = np_order_hub_build_store_api_url($store, 'order-exists');
+    if ($endpoint === '') {
+        return new WP_Error('missing_store_endpoint', 'Missing store endpoint.');
+    }
+
+    $url = add_query_arg(array(
+        'order_id' => $order_id,
+        'token' => $token,
+    ), $endpoint);
+
+    $response = wp_remote_get($url, array(
+        'timeout' => (int) $timeout,
+        'headers' => array(
+            'Accept' => 'application/json',
+        ),
+    ));
+    if (is_wp_error($response)) {
+        return $response;
+    }
+
+    $status_code = (int) wp_remote_retrieve_response_code($response);
+    $body = (string) wp_remote_retrieve_body($response);
+    if ($status_code === 404) {
+        return false;
+    }
+    if ($status_code === 401 || $status_code === 403) {
+        return new WP_Error('store_token_unauthorized', 'Store token request unauthorized.', array(
+            'status' => $status_code,
+            'body' => $body,
+        ));
+    }
+    if ($status_code < 200 || $status_code >= 300) {
+        return new WP_Error('store_order_exists_failed', 'Store order-exists request failed.', array(
+            'status' => $status_code,
+            'body' => $body,
+        ));
+    }
+
+    if ($body !== '') {
+        $decoded = json_decode($body, true);
+        if (is_array($decoded) && array_key_exists('exists', $decoded)) {
+            return !empty($decoded['exists']);
+        }
+    }
+
+    return true;
+}
+
+function np_order_hub_sync_deleted_orders($limit = 250, $store_filter = '') {
     global $wpdb;
 
     $limit = absint($limit);
     if ($limit < 1) {
         $limit = 1;
-    } elseif ($limit > 2000) {
-        $limit = 2000;
+    } elseif ($limit > 20000) {
+        $limit = 20000;
     }
+    $store_filter = sanitize_key((string) $store_filter);
 
     $table = np_order_hub_table_name();
     $stores = np_order_hub_get_stores();
 
-    $records = $wpdb->get_results(
-        $wpdb->prepare(
-            "SELECT id, store_key, order_id FROM $table ORDER BY updated_at_gmt DESC, id DESC LIMIT %d",
-            $limit
-        ),
-        ARRAY_A
-    );
+    if ($store_filter !== '') {
+        $records = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT id, store_key, order_id FROM $table WHERE store_key = %s ORDER BY updated_at_gmt DESC, id DESC LIMIT %d",
+                $store_filter,
+                $limit
+            ),
+            ARRAY_A
+        );
+    } else {
+        $records = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT id, store_key, order_id FROM $table ORDER BY updated_at_gmt DESC, id DESC LIMIT %d",
+                $limit
+            ),
+            ARRAY_A
+        );
+    }
 
     $stats = array(
         'checked' => 0,
@@ -53,8 +124,12 @@ function np_order_hub_sync_deleted_orders($limit = 250) {
         'missing_store' => 0,
         'missing_api' => 0,
         'auth_errors' => 0,
+        'token_fallback_checked' => 0,
+        'token_missing' => 0,
+        'token_auth_errors' => 0,
         'other_errors' => 0,
         'limit' => $limit,
+        'store_filter' => $store_filter,
     );
 
     if (empty($records)) {
@@ -81,26 +156,72 @@ function np_order_hub_sync_deleted_orders($limit = 250) {
         }
         $store = $stores[$store_key];
 
+        $fallback_to_token_check = false;
+
         if (empty($store['consumer_key']) || empty($store['consumer_secret'])) {
+            $fallback_to_token_check = true;
             $stats['missing_api']++;
+        } else {
+            $response = np_order_hub_wc_api_request($store, 'orders/' . $order_id, array(), 12);
+            if (is_wp_error($response)) {
+                $error_code = (string) $response->get_error_code();
+                if ($error_code === 'missing_api_credentials') {
+                    $stats['missing_api']++;
+                } else {
+                    $stats['other_errors']++;
+                }
+                $fallback_to_token_check = true;
+            } else {
+                $status_code = (int) wp_remote_retrieve_response_code($response);
+                $body = wp_remote_retrieve_body($response);
+
+                if (np_order_hub_wc_response_indicates_missing_order($status_code, $body)) {
+                    $deleted = $wpdb->delete(
+                        $table,
+                        array('id' => $record_id),
+                        array('%d')
+                    );
+                    if ($deleted !== false) {
+                        $stats['removed']++;
+                        $job_key = np_order_hub_print_queue_job_key($store_key, $order_id);
+                        if ($job_key !== '') {
+                            np_order_hub_print_queue_remove_job($job_key);
+                        }
+                    } else {
+                        $stats['other_errors']++;
+                    }
+                    continue;
+                }
+
+                if ($status_code === 401 || $status_code === 403) {
+                    $stats['auth_errors']++;
+                    $fallback_to_token_check = true;
+                } elseif ($status_code < 200 || $status_code >= 300) {
+                    $stats['other_errors']++;
+                    $fallback_to_token_check = true;
+                }
+            }
+        }
+
+        if (!$fallback_to_token_check) {
             continue;
         }
 
-        $response = np_order_hub_wc_api_request($store, 'orders/' . $order_id, array(), 12);
-        if (is_wp_error($response)) {
-            $error_code = (string) $response->get_error_code();
-            if ($error_code === 'missing_api_credentials') {
-                $stats['missing_api']++;
+        $exists = np_order_hub_check_store_order_exists_via_token($store, $order_id, 12);
+        if (is_wp_error($exists)) {
+            $error_code = (string) $exists->get_error_code();
+            if ($error_code === 'missing_store_token') {
+                $stats['token_missing']++;
+            } elseif ($error_code === 'store_token_unauthorized') {
+                $stats['token_auth_errors']++;
             } else {
                 $stats['other_errors']++;
             }
             continue;
         }
 
-        $status_code = (int) wp_remote_retrieve_response_code($response);
-        $body = wp_remote_retrieve_body($response);
-
-        if (np_order_hub_wc_response_indicates_missing_order($status_code, $body)) {
+        $stats['token_fallback_checked']++;
+        if ($exists === false) {
             $deleted = $wpdb->delete(
                 $table,
                 array('id' => $record_id),
@@ -115,13 +236,6 @@ function np_order_hub_sync_deleted_orders($limit = 250) {
             } else {
                 $stats['other_errors']++;
             }
-            continue;
-        }
-
-        if ($status_code === 401 || $status_code === 403) {
-            $stats['auth_errors']++;
-        } elseif ($status_code < 200 || $status_code >= 300) {
-            $stats['other_errors']++;
         }
     }
 
@@ -145,22 +259,28 @@ function np_order_hub_debug_page() {
                 'message' => 'Ran ' . (int) $ran . ' due print job(s).',
             );
         } elseif ($action === 'sync_deleted') {
-            $limit = isset($_POST['np_order_hub_deleted_sync_limit']) ? absint($_POST['np_order_hub_deleted_sync_limit']) : 250;
-            $result = np_order_hub_sync_deleted_orders($limit);
+            $limit = isset($_POST['np_order_hub_deleted_sync_limit']) ? absint($_POST['np_order_hub_deleted_sync_limit']) : 5000;
+            $store_filter = isset($_POST['np_order_hub_deleted_sync_store']) ? sanitize_key((string) wp_unslash($_POST['np_order_hub_deleted_sync_store'])) : '';
+            $result = np_order_hub_sync_deleted_orders($limit, $store_filter);
             if (is_wp_error($result)) {
                 $queue_notice = array(
                     'type' => 'error',
                     'message' => $result->get_error_message(),
                 );
             } else {
+                $scope = isset($result['store_filter']) && $result['store_filter'] !== '' ? (string) $result['store_filter'] : 'all stores';
                 $queue_notice = array(
                     'type' => 'updated',
                     'message' => sprintf(
-                        'Deleted-order sync done. Checked: %d, removed from hub: %d, missing API creds: %d, auth errors: %d, other errors: %d.',
+                        'Deleted-order sync done (%s). Checked: %d, removed from hub: %d, Woo missing creds: %d, Woo auth errors: %d, token checks: %d, token missing: %d, token auth errors: %d, other errors: %d.',
+                        $scope,
                         (int) ($result['checked'] ?? 0),
                         (int) ($result['removed'] ?? 0),
                         (int) ($result['missing_api'] ?? 0),
                         (int) ($result['auth_errors'] ?? 0),
+                        (int) ($result['token_fallback_checked'] ?? 0),
+                        (int) ($result['token_missing'] ?? 0),
+                        (int) ($result['token_auth_errors'] ?? 0),
                         (int) ($result['other_errors'] ?? 0)
                     ),
                 );
@@ -234,9 +354,11 @@ function np_order_hub_debug_page() {
     wp_nonce_field('np_order_hub_debug_print_queue');
     echo '<input type="hidden" name="np_order_hub_print_queue_action" value="sync_deleted" />';
     echo '<label for="np-order-hub-deleted-sync-limit" style="margin-right:8px;">Check latest records:</label>';
-    echo '<input id="np-order-hub-deleted-sync-limit" name="np_order_hub_deleted_sync_limit" type="number" min="10" max="2000" value="250" style="width:90px; margin-right:8px;" />';
+    echo '<input id="np-order-hub-deleted-sync-limit" name="np_order_hub_deleted_sync_limit" type="number" min="10" max="20000" value="5000" style="width:90px; margin-right:8px;" />';
+    echo '<label for="np-order-hub-deleted-sync-store" style="margin-right:8px;">Store key (optional):</label>';
+    echo '<input id="np-order-hub-deleted-sync-store" name="np_order_hub_deleted_sync_store" type="text" value="" placeholder="tangen_root_nordicprofil_no" style="width:220px; margin-right:8px;" />';
     echo '<button class="button" type="submit">Sync already deleted orders</button>';
-    echo '<p class="description" style="margin-top:6px;">Checks latest hub records against WooCommerce API and removes orders that no longer exist on subsite.</p>';
+    echo '<p class="description" style="margin-top:6px;">Checks hub records against WooCommerce API and falls back to token endpoint <code>order-exists</code> when API credentials fail.</p>';
     echo '</form>';
 
     if (empty($jobs)) {
