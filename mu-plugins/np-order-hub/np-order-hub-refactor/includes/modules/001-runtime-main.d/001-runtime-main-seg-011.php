@@ -1,4 +1,48 @@
 <?php
+function np_order_hub_is_delete_payload($event, $topic, $data) {
+    $event = sanitize_key((string) $event);
+    $topic = strtolower(trim((string) $topic));
+
+    if (in_array($event, array('deleted', 'delete', 'trashed', 'trash', 'removed', 'remove'), true)) {
+        return true;
+    }
+
+    if ($topic !== '' && preg_match('/(^|\\.)(deleted|delete|trashed|trash|removed|remove)$/', $topic)) {
+        return true;
+    }
+
+    if (!is_array($data)) {
+        return false;
+    }
+
+    if (array_key_exists('deleted', $data)) {
+        $deleted = $data['deleted'];
+        if ($deleted === true) {
+            return true;
+        }
+        if (is_numeric($deleted) && (int) $deleted === 1) {
+            return true;
+        }
+        if (is_string($deleted)) {
+            $deleted = strtolower(trim($deleted));
+            if (in_array($deleted, array('1', 'true', 'yes'), true)) {
+                return true;
+            }
+        }
+    }
+
+    $status = isset($data['status']) ? sanitize_key((string) $data['status']) : '';
+    if (strpos($status, 'wc-') === 0) {
+        $status = substr($status, 3);
+    }
+
+    if (in_array($status, array('trash', 'trashed', 'deleted', 'auto-draft'), true)) {
+        return true;
+    }
+
+    return false;
+}
+
 function np_order_hub_handle_webhook(WP_REST_Request $request) {
     $body = $request->get_body();
     $signature = (string) $request->get_header('X-WC-Webhook-Signature');
@@ -65,7 +109,7 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
     }
 
     $order_id = absint($data['id']);
-    if (in_array($event, array('deleted', 'trashed', 'trash'), true)) {
+    if (np_order_hub_is_delete_payload($event, $topic, $data)) {
         global $wpdb;
         $table = np_order_hub_table_name();
         $job_key = np_order_hub_print_queue_job_key(isset($store['key']) ? $store['key'] : '', $order_id);

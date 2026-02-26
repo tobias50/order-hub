@@ -21,6 +21,10 @@ add_action('woocommerce_trash_order', 'np_order_hub_wpo_push_order_trash_to_hub'
 add_action('woocommerce_untrash_order', 'np_order_hub_wpo_push_order_untrash_to_hub', 30, 2);
 add_action('woocommerce_before_delete_order', 'np_order_hub_wpo_push_order_before_delete_to_hub', 30, 2);
 add_action('woocommerce_delete_order', 'np_order_hub_wpo_push_order_delete_to_hub', 30, 1);
+add_action('transition_post_status', 'np_order_hub_wpo_push_order_post_status_transition_to_hub', 30, 3);
+add_action('trashed_post', 'np_order_hub_wpo_push_order_post_trashed_to_hub', 30, 1);
+add_action('untrash_post', 'np_order_hub_wpo_push_order_post_untrashed_to_hub', 30, 1);
+add_action('before_delete_post', 'np_order_hub_wpo_push_order_post_before_delete_to_hub', 30, 2);
 add_action('woocommerce_order_refunded', 'np_order_hub_wpo_push_order_refunded_to_hub', 30, 2);
 add_action('woocommerce_refund_deleted', 'np_order_hub_wpo_push_order_refund_deleted_to_hub', 30, 2);
 add_action('rest_api_init', 'np_order_hub_wpo_register_routes');

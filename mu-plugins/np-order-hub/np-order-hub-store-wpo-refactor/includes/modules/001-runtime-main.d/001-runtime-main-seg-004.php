@@ -46,6 +46,69 @@ function np_order_hub_wpo_push_order_refund_deleted_to_hub($refund_id, $order_id
     np_order_hub_wpo_push_order_to_hub($order_id, 'updated', null);
 }
 
+function np_order_hub_wpo_get_shop_order_id_from_post($post_or_id) {
+    $post = null;
+    if (is_object($post_or_id)) {
+        $post = $post_or_id;
+    } else {
+        $post_id = absint($post_or_id);
+        if ($post_id > 0) {
+            $post = get_post($post_id);
+        }
+    }
+
+    if (!$post || !is_object($post)) {
+        return 0;
+    }
+
+    $post_type = isset($post->post_type) ? (string) $post->post_type : '';
+    if ($post_type !== 'shop_order') {
+        return 0;
+    }
+
+    return isset($post->ID) ? absint($post->ID) : 0;
+}
+
+function np_order_hub_wpo_push_order_post_status_transition_to_hub($new_status, $old_status, $post) {
+    $order_id = np_order_hub_wpo_get_shop_order_id_from_post($post);
+    if ($order_id < 1 || (string) $new_status === (string) $old_status) {
+        return;
+    }
+
+    if ((string) $new_status === 'trash') {
+        np_order_hub_wpo_push_order_to_hub($order_id, 'deleted', null);
+        return;
+    }
+
+    if ((string) $old_status === 'trash') {
+        np_order_hub_wpo_push_order_to_hub($order_id, 'updated', null);
+    }
+}
+
+function np_order_hub_wpo_push_order_post_trashed_to_hub($post_id) {
+    $order_id = np_order_hub_wpo_get_shop_order_id_from_post($post_id);
+    if ($order_id < 1) {
+        return;
+    }
+    np_order_hub_wpo_push_order_to_hub($order_id, 'deleted', null);
+}
+
+function np_order_hub_wpo_push_order_post_untrashed_to_hub($post_id) {
+    $order_id = np_order_hub_wpo_get_shop_order_id_from_post($post_id);
+    if ($order_id < 1) {
+        return;
+    }
+    np_order_hub_wpo_push_order_to_hub($order_id, 'updated', null);
+}
+
+function np_order_hub_wpo_push_order_post_before_delete_to_hub($post_id, $post = null) {
+    $order_id = np_order_hub_wpo_get_shop_order_id_from_post($post ? $post : $post_id);
+    if ($order_id < 1) {
+        return;
+    }
+    np_order_hub_wpo_push_order_to_hub($order_id, 'deleted', null);
+}
+
 function np_order_hub_wpo_admin_menu() {
     add_submenu_page(
         'woocommerce',
