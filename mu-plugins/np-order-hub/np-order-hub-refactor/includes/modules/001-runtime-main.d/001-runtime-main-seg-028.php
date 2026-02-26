@@ -90,6 +90,36 @@ function np_order_hub_wc_response_indicates_missing_order($status_code, $body) {
     return false;
 }
 
+function np_order_hub_token_response_indicates_missing_order($status_code, $body) {
+    $status_code = (int) $status_code;
+    if ($status_code !== 404 && $status_code !== 410) {
+        return false;
+    }
+    if (!is_string($body) || trim($body) === '') {
+        return false;
+    }
+    $decoded = json_decode($body, true);
+    if (!is_array($decoded)) {
+        return false;
+    }
+    if (array_key_exists('exists', $decoded)) {
+        return empty($decoded['exists']);
+    }
+    $status = sanitize_key((string) ($decoded['status'] ?? ''));
+    if (in_array($status, array('not_found', 'missing', 'deleted'), true)) {
+        return true;
+    }
+    $error = sanitize_key((string) ($decoded['error'] ?? ''));
+    if (in_array($error, array('not_found', 'order_not_found'), true)) {
+        return true;
+    }
+    $code = sanitize_key((string) ($decoded['code'] ?? ''));
+    if ($code === 'woocommerce_rest_shop_order_invalid_id') {
+        return true;
+    }
+    return false;
+}
+
 function np_order_hub_check_store_order_exists_via_token($store, $order_id, $timeout = 12) {
     $order_id = absint($order_id);
     if ($order_id < 1) {
@@ -123,8 +153,14 @@ function np_order_hub_check_store_order_exists_via_token($store, $order_id, $tim
 
     $status_code = (int) wp_remote_retrieve_response_code($response);
     $body = (string) wp_remote_retrieve_body($response);
-    if ($status_code === 404) {
-        return false;
+    if ($status_code === 404 || $status_code === 410) {
+        if (np_order_hub_token_response_indicates_missing_order($status_code, $body)) {
+            return false;
+        }
+        return new WP_Error('store_token_ambiguous_not_found', 'Store token request returned ambiguous not-found response.', array(
+            'status' => $status_code,
+            'body' => $body,
+        ));
     }
     if ($status_code === 401 || $status_code === 403) {
         return new WP_Error('store_token_unauthorized', 'Store token request unauthorized.', array(
@@ -347,11 +383,17 @@ function np_order_hub_fetch_store_order_state_via_token($store, $order_id, $time
 
     $status_code = (int) wp_remote_retrieve_response_code($response);
     $body = (string) wp_remote_retrieve_body($response);
-    if ($status_code === 404) {
-        return array(
-            'exists' => false,
-            'source' => 'token',
-        );
+    if ($status_code === 404 || $status_code === 410) {
+        if (np_order_hub_token_response_indicates_missing_order($status_code, $body)) {
+            return array(
+                'exists' => false,
+                'source' => 'token',
+            );
+        }
+        return new WP_Error('token_ambiguous_not_found', 'Token endpoint returned ambiguous not-found response.', array(
+            'status' => $status_code,
+            'body' => $body,
+        ));
     }
     if ($status_code === 401 || $status_code === 403) {
         return new WP_Error('token_unauthorized', 'Token request unauthorized.', array(
@@ -451,6 +493,21 @@ function np_order_hub_fetch_store_order_state_via_wc($store, $order_id, $timeout
 function np_order_hub_fetch_remote_order_state($store, $order_id, $timeout = 12) {
     $token_result = np_order_hub_fetch_store_order_state_via_token($store, $order_id, $timeout);
     if (!is_wp_error($token_result)) {
+        if (empty($token_result['exists'])) {
+            // Avoid destructive delete on token-only "missing" unless Woo API confirms.
+            $wc_verify = np_order_hub_fetch_store_order_state_via_wc($store, $order_id, $timeout);
+            if (!is_wp_error($wc_verify)) {
+                return $wc_verify;
+            }
+            return new WP_Error(
+                'state_missing_unverified',
+                'Token endpoint reported missing order, but Woo API verification failed: ' . $wc_verify->get_error_message(),
+                array(
+                    'token_source' => 'token',
+                    'wc_error_code' => (string) $wc_verify->get_error_code(),
+                )
+            );
+        }
         return $token_result;
     }
 
@@ -466,6 +523,296 @@ function np_order_hub_fetch_remote_order_state($store, $order_id, $timeout = 12)
         'token_error_code' => $token_code,
         'wc_error_code' => $wc_code,
     ));
+}
+
+function np_order_hub_fetch_processing_orders_page($store, $per_page, $page) {
+    $per_page = absint($per_page);
+    if ($per_page < 1) {
+        $per_page = 100;
+    } elseif ($per_page > 200) {
+        $per_page = 200;
+    }
+    $page = absint($page);
+    if ($page < 1) {
+        $page = 1;
+    }
+
+    $params = array(
+        'status' => 'processing',
+        'orderby' => 'date',
+        'order' => 'desc',
+        'per_page' => $per_page,
+        'page' => $page,
+    );
+
+    $wc_error = null;
+    if (!empty($store['consumer_key']) && !empty($store['consumer_secret'])) {
+        $response = np_order_hub_wc_api_request($store, 'orders', $params, 25);
+        if (!is_wp_error($response)) {
+            $code = (int) wp_remote_retrieve_response_code($response);
+            $body = (string) wp_remote_retrieve_body($response);
+            if ($code >= 200 && $code < 300) {
+                $orders = $body !== '' ? json_decode($body, true) : null;
+                if (is_array($orders)) {
+                    $total_pages = (int) wp_remote_retrieve_header($response, 'x-wp-totalpages');
+                    if ($total_pages < 1) {
+                        $total_pages = 0;
+                    }
+                    return array(
+                        'orders' => $orders,
+                        'source' => 'wc',
+                        'total_pages' => $total_pages,
+                    );
+                }
+                $wc_error = new WP_Error('wc_bad_payload', 'Invalid WooCommerce order list payload.');
+            } else {
+                $wc_error = np_order_hub_wc_api_error_response($code, $body);
+            }
+        } else {
+            $wc_error = $response;
+        }
+    } else {
+        $wc_error = new WP_Error('missing_api_credentials', 'Missing WooCommerce API credentials.');
+    }
+
+    $token = np_order_hub_get_store_token($store);
+    if ($token === '') {
+        return $wc_error;
+    }
+    $endpoint = np_order_hub_build_store_api_url($store, 'orders-export');
+    if ($endpoint === '') {
+        return $wc_error;
+    }
+
+    $url = add_query_arg(array(
+        'token' => $token,
+        'status' => 'processing',
+        'per_page' => $per_page,
+        'page' => $page,
+    ), $endpoint);
+    $token_response = wp_remote_get($url, array(
+        'timeout' => 25,
+        'headers' => array(
+            'Accept' => 'application/json',
+        ),
+    ));
+    if (is_wp_error($token_response)) {
+        if (is_wp_error($wc_error)) {
+            return new WP_Error(
+                'orders_page_fetch_failed',
+                'Woo API: ' . $wc_error->get_error_message() . '; Token export: ' . $token_response->get_error_message()
+            );
+        }
+        return $token_response;
+    }
+
+    $token_code = (int) wp_remote_retrieve_response_code($token_response);
+    $token_body = (string) wp_remote_retrieve_body($token_response);
+    if ($token_code < 200 || $token_code >= 300) {
+        if (is_wp_error($wc_error)) {
+            return new WP_Error(
+                'orders_page_fetch_failed',
+                'Woo API: ' . $wc_error->get_error_message() . '; Token export HTTP ' . $token_code
+            );
+        }
+        return new WP_Error('orders_export_http_error', 'Token export failed (HTTP ' . $token_code . ').');
+    }
+
+    $decoded = $token_body !== '' ? json_decode($token_body, true) : null;
+    if (!is_array($decoded)) {
+        if (is_wp_error($wc_error)) {
+            return new WP_Error(
+                'orders_page_fetch_failed',
+                'Woo API: ' . $wc_error->get_error_message() . '; Token export returned invalid JSON.'
+            );
+        }
+        return new WP_Error('orders_export_bad_payload', 'Token export payload was invalid.');
+    }
+
+    $orders = isset($decoded['orders']) && is_array($decoded['orders']) ? $decoded['orders'] : array();
+    $total_pages = isset($decoded['total_pages']) ? absint($decoded['total_pages']) : 0;
+
+    return array(
+        'orders' => $orders,
+        'source' => 'token',
+        'total_pages' => $total_pages,
+    );
+}
+
+function np_order_hub_backfill_processing_orders($store_filter = '', $max_per_store = 200) {
+    global $wpdb;
+
+    $table = np_order_hub_table_name();
+    $stores = np_order_hub_get_stores();
+    $store_filter = sanitize_key((string) $store_filter);
+    $max_per_store = absint($max_per_store);
+    if ($max_per_store < 1) {
+        $max_per_store = 200;
+    } elseif ($max_per_store > 2000) {
+        $max_per_store = 2000;
+    }
+
+    if ($store_filter !== '') {
+        if (empty($stores[$store_filter]) || !is_array($stores[$store_filter])) {
+            return new WP_Error('unknown_store', 'Unknown store key.');
+        }
+        $stores = array($store_filter => $stores[$store_filter]);
+    }
+
+    $stats = array(
+        'stores' => 0,
+        'checked' => 0,
+        'inserted' => 0,
+        'updated' => 0,
+        'errors' => 0,
+        'source_wc' => 0,
+        'source_token' => 0,
+    );
+
+    foreach ($stores as $store_key => $store) {
+        if (!is_array($store)) {
+            continue;
+        }
+        $stats['stores']++;
+
+        $per_page = $max_per_store > 100 ? 100 : $max_per_store;
+        $max_pages = (int) ceil($max_per_store / $per_page);
+        if ($max_pages < 1) {
+            $max_pages = 1;
+        }
+        $processed_for_store = 0;
+
+        for ($page = 1; $page <= $max_pages; $page++) {
+            $page_result = np_order_hub_fetch_processing_orders_page($store, $per_page, $page);
+            if (is_wp_error($page_result)) {
+                $stats['errors']++;
+                break;
+            }
+
+            $orders = isset($page_result['orders']) && is_array($page_result['orders']) ? $page_result['orders'] : array();
+            $source = isset($page_result['source']) ? (string) $page_result['source'] : '';
+            if ($source === 'wc') {
+                $stats['source_wc']++;
+            } elseif ($source === 'token') {
+                $stats['source_token']++;
+            }
+            if (empty($orders)) {
+                break;
+            }
+
+            foreach ($orders as $data) {
+                if (!is_array($data)) {
+                    continue;
+                }
+                $order_id = absint($data['id'] ?? 0);
+                if ($order_id < 1) {
+                    continue;
+                }
+                $status = sanitize_key((string) ($data['status'] ?? ''));
+                if ($status !== 'processing') {
+                    continue;
+                }
+
+                if ($processed_for_store >= $max_per_store) {
+                    break 2;
+                }
+                $processed_for_store++;
+                $stats['checked']++;
+
+                $order_number = isset($data['number']) ? sanitize_text_field((string) $data['number']) : (string) $order_id;
+                $currency = isset($data['currency']) ? sanitize_text_field((string) $data['currency']) : '';
+                $total = np_order_hub_parse_numeric_value($data['total'] ?? 0);
+                if ($total === null) {
+                    $total = 0.0;
+                }
+
+                $date_created_gmt = np_order_hub_parse_datetime_gmt(
+                    $data['date_created_gmt'] ?? '',
+                    $data['date_created'] ?? ''
+                );
+                $date_modified_gmt = np_order_hub_parse_datetime_gmt(
+                    $data['date_modified_gmt'] ?? '',
+                    $data['date_modified'] ?? ''
+                );
+
+                $existing = $wpdb->get_row(
+                    $wpdb->prepare(
+                        "SELECT id, payload FROM $table WHERE store_key = %s AND order_id = %d",
+                        $store_key,
+                        $order_id
+                    ),
+                    ARRAY_A
+                );
+                $existing_id = $existing ? (int) $existing['id'] : 0;
+                $existing_bucket = $existing ? np_order_hub_extract_delivery_bucket_from_payload_data($existing['payload']) : '';
+                $existing_payload = array();
+                if ($existing && !empty($existing['payload'])) {
+                    $decoded_existing_payload = json_decode((string) $existing['payload'], true);
+                    if (is_array($decoded_existing_payload)) {
+                        $existing_payload = $decoded_existing_payload;
+                    }
+                }
+
+                $store_bucket = np_order_hub_get_active_store_delivery_bucket($store);
+                $bucket_to_set = $existing_bucket !== '' ? $existing_bucket : $store_bucket;
+                $data[NP_ORDER_HUB_DELIVERY_BUCKET_KEY] = $bucket_to_set;
+                if (!empty($existing_payload['np_reklamasjon']) && empty($data['np_reklamasjon'])) {
+                    $data['np_reklamasjon'] = true;
+                }
+                if (!empty($existing_payload['np_reklamasjon_source_order']) && empty($data['np_reklamasjon_source_order'])) {
+                    $data['np_reklamasjon_source_order'] = (int) $existing_payload['np_reklamasjon_source_order'];
+                }
+                if (!empty($existing_payload['np_bytte_storrelse']) && empty($data['np_bytte_storrelse'])) {
+                    $data['np_bytte_storrelse'] = true;
+                }
+                if (!empty($existing_payload['np_bytte_storrelse_source_order']) && empty($data['np_bytte_storrelse_source_order'])) {
+                    $data['np_bytte_storrelse_source_order'] = (int) $existing_payload['np_bytte_storrelse_source_order'];
+                }
+
+                $record = array(
+                    'store_key' => $store_key,
+                    'store_name' => isset($store['name']) ? (string) $store['name'] : '',
+                    'store_url' => isset($store['url']) ? (string) $store['url'] : '',
+                    'order_id' => $order_id,
+                    'order_number' => $order_number,
+                    'status' => $status,
+                    'currency' => $currency,
+                    'total' => (float) $total,
+                    'date_created_gmt' => $date_created_gmt !== '' ? $date_created_gmt : null,
+                    'date_modified_gmt' => $date_modified_gmt !== '' ? $date_modified_gmt : null,
+                    'order_admin_url' => np_order_hub_build_admin_order_url($store, $order_id),
+                    'payload' => wp_json_encode($data),
+                );
+
+                $now_gmt = current_time('mysql', true);
+                if ($existing_id > 0) {
+                    $record['updated_at_gmt'] = $now_gmt;
+                    $updated = $wpdb->update($table, $record, array('id' => $existing_id));
+                    if ($updated === false) {
+                        $stats['errors']++;
+                    } else {
+                        $stats['updated']++;
+                    }
+                } else {
+                    $record['created_at_gmt'] = $date_created_gmt !== '' ? $date_created_gmt : $now_gmt;
+                    $record['updated_at_gmt'] = $now_gmt;
+                    $inserted = $wpdb->insert($table, $record);
+                    if ($inserted === false) {
+                        $stats['errors']++;
+                    } else {
+                        $stats['inserted']++;
+                    }
+                }
+            }
+
+            $total_pages = isset($page_result['total_pages']) ? absint($page_result['total_pages']) : 0;
+            if (count($orders) < $per_page || ($total_pages > 0 && $page >= $total_pages) || $processed_for_store >= $max_per_store) {
+                break;
+            }
+        }
+    }
+
+    return $stats;
 }
 
 function np_order_hub_status_sync_get_cursor() {
@@ -764,6 +1111,32 @@ function np_order_hub_debug_page() {
                     ),
                 );
             }
+        } elseif ($action === 'rebuild_processing') {
+            $store_filter = isset($_POST['np_order_hub_rebuild_store']) ? sanitize_key((string) wp_unslash($_POST['np_order_hub_rebuild_store'])) : '';
+            $max_per_store = isset($_POST['np_order_hub_rebuild_limit']) ? absint($_POST['np_order_hub_rebuild_limit']) : 300;
+            $result = np_order_hub_backfill_processing_orders($store_filter, $max_per_store);
+            if (is_wp_error($result)) {
+                $queue_notice = array(
+                    'type' => 'error',
+                    'message' => $result->get_error_message(),
+                );
+            } else {
+                $scope = $store_filter !== '' ? $store_filter : 'all stores';
+                $queue_notice = array(
+                    'type' => 'updated',
+                    'message' => sprintf(
+                        'Processing rebuild done (%s). Stores: %d, checked: %d, inserted: %d, updated: %d, page fetches via Woo: %d, via token: %d, errors: %d.',
+                        $scope,
+                        (int) ($result['stores'] ?? 0),
+                        (int) ($result['checked'] ?? 0),
+                        (int) ($result['inserted'] ?? 0),
+                        (int) ($result['updated'] ?? 0),
+                        (int) ($result['source_wc'] ?? 0),
+                        (int) ($result['source_token'] ?? 0),
+                        (int) ($result['errors'] ?? 0)
+                    ),
+                );
+            }
         } elseif ($action === 'retry_job') {
             $job_key = sanitize_text_field((string) ($_POST['np_order_hub_print_job_key'] ?? ''));
             $retry = np_order_hub_print_queue_retry_now($job_key);
@@ -846,6 +1219,16 @@ function np_order_hub_debug_page() {
     echo '<input id="np-order-hub-status-sync-limit" name="np_order_hub_status_sync_limit" type="number" min="10" max="5000" value="' . esc_attr((string) NP_ORDER_HUB_STATUS_SYNC_LIMIT) . '" style="width:90px; margin-right:8px;" />';
     echo '<button class="button" type="submit">Sync statuses now</button>';
     echo '<p class="description" style="margin-top:6px;">Runs one reconciliation batch against subsite order status (auto-runs every 5 minutes in background).</p>';
+    echo '</form>';
+    echo '<form method="post" style="margin:0 0 18px;">';
+    wp_nonce_field('np_order_hub_debug_print_queue');
+    echo '<input type="hidden" name="np_order_hub_print_queue_action" value="rebuild_processing" />';
+    echo '<label for="np-order-hub-rebuild-store" style="margin-right:8px;">Store key (optional):</label>';
+    echo '<input id="np-order-hub-rebuild-store" name="np_order_hub_rebuild_store" type="text" value="" placeholder="tangen_root_nordicprofil_no" style="width:220px; margin-right:8px;" />';
+    echo '<label for="np-order-hub-rebuild-limit" style="margin-right:8px;">Max per store:</label>';
+    echo '<input id="np-order-hub-rebuild-limit" name="np_order_hub_rebuild_limit" type="number" min="50" max="2000" value="300" style="width:90px; margin-right:8px;" />';
+    echo '<button class="button" type="submit">Rebuild processing orders now</button>';
+    echo '<p class="description" style="margin-top:6px;">Fetches <code>processing</code> orders and upserts them back into hub (tries Woo API first, falls back to token export, no email/webhook side effects).</p>';
     echo '</form>';
 
     if (empty($jobs)) {

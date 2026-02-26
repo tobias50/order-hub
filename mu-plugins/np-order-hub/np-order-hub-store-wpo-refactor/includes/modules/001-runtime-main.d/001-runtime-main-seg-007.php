@@ -352,6 +352,168 @@ function np_order_hub_wpo_order_state(WP_REST_Request $request) {
     ), 200);
 }
 
+function np_order_hub_wpo_export_order_line_items($order) {
+    $items = array();
+    if (!is_object($order) || !method_exists($order, 'get_items')) {
+        return $items;
+    }
+    foreach ($order->get_items('line_item') as $item_id => $item) {
+        if (!is_object($item)) {
+            continue;
+        }
+        $product = method_exists($item, 'get_product') ? $item->get_product() : null;
+        $items[] = array(
+            'id' => (int) $item_id,
+            'name' => sanitize_text_field((string) $item->get_name()),
+            'product_id' => method_exists($item, 'get_product_id') ? (int) $item->get_product_id() : 0,
+            'variation_id' => method_exists($item, 'get_variation_id') ? (int) $item->get_variation_id() : 0,
+            'quantity' => method_exists($item, 'get_quantity') ? (int) $item->get_quantity() : 0,
+            'total' => wc_format_decimal((float) $item->get_total(), wc_get_price_decimals()),
+            'subtotal' => wc_format_decimal((float) $item->get_subtotal(), wc_get_price_decimals()),
+            'sku' => (is_object($product) && method_exists($product, 'get_sku')) ? sanitize_text_field((string) $product->get_sku()) : '',
+        );
+    }
+    return $items;
+}
+
+function np_order_hub_wpo_export_order_shipping_lines($order) {
+    $items = array();
+    if (!is_object($order) || !method_exists($order, 'get_items')) {
+        return $items;
+    }
+    foreach ($order->get_items('shipping') as $item_id => $item) {
+        if (!is_object($item)) {
+            continue;
+        }
+        $items[] = array(
+            'id' => (int) $item_id,
+            'method_title' => method_exists($item, 'get_name') ? sanitize_text_field((string) $item->get_name()) : '',
+            'method_id' => method_exists($item, 'get_method_id') ? sanitize_key((string) $item->get_method_id()) : '',
+            'total' => wc_format_decimal((float) $item->get_total(), wc_get_price_decimals()),
+        );
+    }
+    return $items;
+}
+
+function np_order_hub_wpo_export_order_payload($order) {
+    if (!is_object($order) || !method_exists($order, 'get_id')) {
+        return array();
+    }
+    $created = method_exists($order, 'get_date_created') ? $order->get_date_created() : null;
+    $modified = method_exists($order, 'get_date_modified') ? $order->get_date_modified() : null;
+
+    return array(
+        'id' => (int) $order->get_id(),
+        'number' => method_exists($order, 'get_order_number') ? (string) $order->get_order_number() : (string) $order->get_id(),
+        'status' => method_exists($order, 'get_status') ? sanitize_key((string) $order->get_status()) : '',
+        'currency' => method_exists($order, 'get_currency') ? sanitize_text_field((string) $order->get_currency()) : '',
+        'total' => method_exists($order, 'get_total') ? wc_format_decimal((float) $order->get_total(), wc_get_price_decimals()) : '0',
+        'date_created' => np_order_hub_wpo_iso_datetime($created, false),
+        'date_created_gmt' => np_order_hub_wpo_iso_datetime($created, true),
+        'date_modified' => np_order_hub_wpo_iso_datetime($modified, false),
+        'date_modified_gmt' => np_order_hub_wpo_iso_datetime($modified, true),
+        'billing' => array(
+            'first_name' => method_exists($order, 'get_billing_first_name') ? sanitize_text_field((string) $order->get_billing_first_name()) : '',
+            'last_name' => method_exists($order, 'get_billing_last_name') ? sanitize_text_field((string) $order->get_billing_last_name()) : '',
+            'company' => method_exists($order, 'get_billing_company') ? sanitize_text_field((string) $order->get_billing_company()) : '',
+            'email' => method_exists($order, 'get_billing_email') ? sanitize_email((string) $order->get_billing_email()) : '',
+            'phone' => method_exists($order, 'get_billing_phone') ? sanitize_text_field((string) $order->get_billing_phone()) : '',
+        ),
+        'shipping' => array(
+            'first_name' => method_exists($order, 'get_shipping_first_name') ? sanitize_text_field((string) $order->get_shipping_first_name()) : '',
+            'last_name' => method_exists($order, 'get_shipping_last_name') ? sanitize_text_field((string) $order->get_shipping_last_name()) : '',
+            'company' => method_exists($order, 'get_shipping_company') ? sanitize_text_field((string) $order->get_shipping_company()) : '',
+        ),
+        'line_items' => np_order_hub_wpo_export_order_line_items($order),
+        'shipping_lines' => np_order_hub_wpo_export_order_shipping_lines($order),
+    );
+}
+
+function np_order_hub_wpo_orders_export(WP_REST_Request $request) {
+    $token = (string) $request->get_param('token');
+    if ($token === '') {
+        $token = (string) $request->get_header('x-np-order-hub-token');
+    }
+    if (!np_order_hub_wpo_check_token($token)) {
+        return new WP_REST_Response(array('error' => 'unauthorized'), 401);
+    }
+    if (!function_exists('wc_get_orders')) {
+        return new WP_REST_Response(array('error' => 'woocommerce_missing'), 500);
+    }
+
+    $status_raw = (string) $request->get_param('status');
+    if ($status_raw === '') {
+        $status_raw = 'processing';
+    }
+    $statuses = array();
+    foreach (explode(',', $status_raw) as $status_item) {
+        $status = sanitize_key((string) $status_item);
+        if ($status === '') {
+            continue;
+        }
+        if (strpos($status, 'wc-') === 0) {
+            $status = substr($status, 3);
+        }
+        if ($status !== '') {
+            $statuses[] = $status;
+        }
+    }
+    $statuses = array_values(array_unique($statuses));
+    if (empty($statuses)) {
+        $statuses = array('processing');
+    }
+
+    $per_page = absint($request->get_param('per_page'));
+    if ($per_page < 1) {
+        $per_page = 100;
+    } elseif ($per_page > 200) {
+        $per_page = 200;
+    }
+    $page = absint($request->get_param('page'));
+    if ($page < 1) {
+        $page = 1;
+    }
+
+    $query = wc_get_orders(array(
+        'status' => $statuses,
+        'limit' => $per_page,
+        'page' => $page,
+        'orderby' => 'date',
+        'order' => 'DESC',
+        'paginate' => true,
+        'return' => 'objects',
+    ));
+
+    $orders = array();
+    $objects = array();
+    $total = 0;
+    $total_pages = 1;
+
+    if (is_array($query) && array_key_exists('orders', $query)) {
+        $objects = is_array($query['orders']) ? $query['orders'] : array();
+        $total = isset($query['total']) ? (int) $query['total'] : 0;
+        $total_pages = isset($query['max_num_pages']) ? (int) $query['max_num_pages'] : 1;
+    } elseif (is_array($query)) {
+        $objects = $query;
+    }
+
+    foreach ($objects as $order) {
+        $payload = np_order_hub_wpo_export_order_payload($order);
+        if (!empty($payload)) {
+            $orders[] = $payload;
+        }
+    }
+
+    return new WP_REST_Response(array(
+        'status' => 'ok',
+        'page' => $page,
+        'per_page' => $per_page,
+        'total' => $total,
+        'total_pages' => $total_pages < 1 ? 1 : $total_pages,
+        'orders' => $orders,
+    ), 200);
+}
+
 function np_order_hub_wpo_get_request_params(WP_REST_Request $request) {
     $params = $request->get_json_params();
     if (!is_array($params) || empty($params)) {

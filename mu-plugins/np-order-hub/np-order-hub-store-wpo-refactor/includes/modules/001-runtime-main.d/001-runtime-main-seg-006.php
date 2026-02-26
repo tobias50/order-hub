@@ -210,6 +210,11 @@ function np_order_hub_wpo_register_routes() {
         'callback' => 'np_order_hub_wpo_order_state',
         'permission_callback' => '__return_true',
     ));
+    register_rest_route('np-order-hub/v1', '/orders-export', array(
+        'methods' => 'GET',
+        'callback' => 'np_order_hub_wpo_orders_export',
+        'permission_callback' => '__return_true',
+    ));
     register_rest_route('np-order-hub/v1', '/reklamasjon-order', array(
         'methods' => 'POST',
         'callback' => 'np_order_hub_wpo_create_reklamasjon_order',
