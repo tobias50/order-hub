@@ -1,4 +1,44 @@
 <?php
+if (!defined('NP_ORDER_HUB_DELETED_SYNC_EVENT')) {
+    define('NP_ORDER_HUB_DELETED_SYNC_EVENT', 'np_order_hub_sync_deleted_orders_cron');
+}
+if (!defined('NP_ORDER_HUB_DELETED_SYNC_INTERVAL')) {
+    define('NP_ORDER_HUB_DELETED_SYNC_INTERVAL', 300);
+}
+if (!defined('NP_ORDER_HUB_DELETED_SYNC_LIMIT')) {
+    define('NP_ORDER_HUB_DELETED_SYNC_LIMIT', 1000);
+}
+
+add_filter('cron_schedules', 'np_order_hub_deleted_sync_cron_schedules');
+add_action('init', 'np_order_hub_deleted_sync_schedule_event');
+add_action(NP_ORDER_HUB_DELETED_SYNC_EVENT, 'np_order_hub_deleted_sync_run_cron');
+
+function np_order_hub_deleted_sync_cron_schedules($schedules) {
+    if (!is_array($schedules)) {
+        $schedules = array();
+    }
+    if (empty($schedules['np_order_hub_5min'])) {
+        $schedules['np_order_hub_5min'] = array(
+            'interval' => NP_ORDER_HUB_DELETED_SYNC_INTERVAL,
+            'display' => 'Every 5 minutes (Order Hub deleted-order sync)',
+        );
+    }
+    return $schedules;
+}
+
+function np_order_hub_deleted_sync_schedule_event() {
+    if (!function_exists('wp_next_scheduled') || !function_exists('wp_schedule_event')) {
+        return;
+    }
+    if (!wp_next_scheduled(NP_ORDER_HUB_DELETED_SYNC_EVENT)) {
+        wp_schedule_event(time() + 120, 'np_order_hub_5min', NP_ORDER_HUB_DELETED_SYNC_EVENT);
+    }
+}
+
+function np_order_hub_deleted_sync_run_cron() {
+    np_order_hub_sync_deleted_orders(NP_ORDER_HUB_DELETED_SYNC_LIMIT);
+}
+
 function np_order_hub_wc_response_indicates_missing_order($status_code, $body) {
     $status_code = (int) $status_code;
     if ($status_code === 404 || $status_code === 410) {
