@@ -292,6 +292,66 @@ function np_order_hub_wpo_order_exists(WP_REST_Request $request) {
     ), 200);
 }
 
+function np_order_hub_wpo_order_state(WP_REST_Request $request) {
+    $order_id = absint($request->get_param('order_id'));
+    $token = (string) $request->get_param('token');
+    if ($token === '') {
+        $token = (string) $request->get_header('x-np-order-hub-token');
+    }
+
+    np_order_hub_wpo_log('order_state_request', array(
+        'order_id' => $order_id,
+        'token_present' => $token !== '',
+    ));
+
+    if (!np_order_hub_wpo_check_token($token)) {
+        return new WP_REST_Response(array('error' => 'unauthorized'), 401);
+    }
+    if ($order_id < 1) {
+        return new WP_REST_Response(array('error' => 'missing_order_id'), 400);
+    }
+    if (!function_exists('wc_get_order')) {
+        return new WP_REST_Response(array('error' => 'woocommerce_missing'), 500);
+    }
+
+    $order = wc_get_order($order_id);
+    if (!$order || !is_a($order, 'WC_Order')) {
+        return new WP_REST_Response(array(
+            'status' => 'not_found',
+            'exists' => false,
+            'order_id' => $order_id,
+        ), 404);
+    }
+
+    $status = method_exists($order, 'get_status') ? sanitize_key((string) $order->get_status()) : '';
+    if ($status === 'trash' || $status === 'auto-draft') {
+        return new WP_REST_Response(array(
+            'status' => 'not_found',
+            'exists' => false,
+            'order_id' => $order_id,
+        ), 404);
+    }
+
+    $currency = method_exists($order, 'get_currency') ? sanitize_text_field((string) $order->get_currency()) : '';
+    $total = method_exists($order, 'get_total') ? (float) $order->get_total() : 0.0;
+    $created = method_exists($order, 'get_date_created') ? $order->get_date_created() : null;
+    $modified = method_exists($order, 'get_date_modified') ? $order->get_date_modified() : null;
+
+    return new WP_REST_Response(array(
+        'status' => 'ok',
+        'exists' => true,
+        'order_id' => $order_id,
+        'order_number' => method_exists($order, 'get_order_number') ? (string) $order->get_order_number() : (string) $order_id,
+        'order_status' => $status,
+        'currency' => $currency,
+        'total' => wc_format_decimal($total, wc_get_price_decimals()),
+        'date_created' => np_order_hub_wpo_iso_datetime($created, false),
+        'date_created_gmt' => np_order_hub_wpo_iso_datetime($created, true),
+        'date_modified' => np_order_hub_wpo_iso_datetime($modified, false),
+        'date_modified_gmt' => np_order_hub_wpo_iso_datetime($modified, true),
+    ), 200);
+}
+
 function np_order_hub_wpo_get_request_params(WP_REST_Request $request) {
     $params = $request->get_json_params();
     if (!is_array($params) || empty($params)) {
