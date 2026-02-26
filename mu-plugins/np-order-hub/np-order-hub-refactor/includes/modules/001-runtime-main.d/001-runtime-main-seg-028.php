@@ -1,4 +1,133 @@
 <?php
+function np_order_hub_wc_response_indicates_missing_order($status_code, $body) {
+    $status_code = (int) $status_code;
+    if ($status_code === 404 || $status_code === 410) {
+        return true;
+    }
+
+    if (!is_string($body) || $body === '') {
+        return false;
+    }
+
+    $decoded = json_decode($body, true);
+    if (!is_array($decoded)) {
+        return false;
+    }
+
+    $code = isset($decoded['code']) ? sanitize_key((string) $decoded['code']) : '';
+    if ($code === '') {
+        return false;
+    }
+
+    if (strpos($code, 'invalid_id') !== false || strpos($code, 'invalid_order') !== false) {
+        return true;
+    }
+
+    return false;
+}
+
+function np_order_hub_sync_deleted_orders($limit = 250) {
+    global $wpdb;
+
+    $limit = absint($limit);
+    if ($limit < 1) {
+        $limit = 1;
+    } elseif ($limit > 2000) {
+        $limit = 2000;
+    }
+
+    $table = np_order_hub_table_name();
+    $stores = np_order_hub_get_stores();
+
+    $records = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT id, store_key, order_id FROM $table ORDER BY updated_at_gmt DESC, id DESC LIMIT %d",
+            $limit
+        ),
+        ARRAY_A
+    );
+
+    $stats = array(
+        'checked' => 0,
+        'removed' => 0,
+        'missing_store' => 0,
+        'missing_api' => 0,
+        'auth_errors' => 0,
+        'other_errors' => 0,
+        'limit' => $limit,
+    );
+
+    if (empty($records)) {
+        return $stats;
+    }
+
+    foreach ($records as $record) {
+        if (!is_array($record)) {
+            continue;
+        }
+
+        $record_id = isset($record['id']) ? absint($record['id']) : 0;
+        $store_key = isset($record['store_key']) ? sanitize_key((string) $record['store_key']) : '';
+        $order_id = isset($record['order_id']) ? absint($record['order_id']) : 0;
+        if ($record_id < 1 || $store_key === '' || $order_id < 1) {
+            continue;
+        }
+
+        $stats['checked']++;
+
+        if (empty($stores[$store_key]) || !is_array($stores[$store_key])) {
+            $stats['missing_store']++;
+            continue;
+        }
+        $store = $stores[$store_key];
+
+        if (empty($store['consumer_key']) || empty($store['consumer_secret'])) {
+            $stats['missing_api']++;
+            continue;
+        }
+
+        $response = np_order_hub_wc_api_request($store, 'orders/' . $order_id, array(), 12);
+        if (is_wp_error($response)) {
+            $error_code = (string) $response->get_error_code();
+            if ($error_code === 'missing_api_credentials') {
+                $stats['missing_api']++;
+            } else {
+                $stats['other_errors']++;
+            }
+            continue;
+        }
+
+        $status_code = (int) wp_remote_retrieve_response_code($response);
+        $body = wp_remote_retrieve_body($response);
+
+        if (np_order_hub_wc_response_indicates_missing_order($status_code, $body)) {
+            $deleted = $wpdb->delete(
+                $table,
+                array('id' => $record_id),
+                array('%d')
+            );
+            if ($deleted !== false) {
+                $stats['removed']++;
+                $job_key = np_order_hub_print_queue_job_key($store_key, $order_id);
+                if ($job_key !== '') {
+                    np_order_hub_print_queue_remove_job($job_key);
+                }
+            } else {
+                $stats['other_errors']++;
+            }
+            continue;
+        }
+
+        if ($status_code === 401 || $status_code === 403) {
+            $stats['auth_errors']++;
+        } elseif ($status_code < 200 || $status_code >= 300) {
+            $stats['other_errors']++;
+        }
+    }
+
+    return $stats;
+}
+
 function np_order_hub_debug_page() {
     if (!current_user_can('manage_options')) {
         return;
@@ -15,6 +144,27 @@ function np_order_hub_debug_page() {
                 'type' => 'updated',
                 'message' => 'Ran ' . (int) $ran . ' due print job(s).',
             );
+        } elseif ($action === 'sync_deleted') {
+            $limit = isset($_POST['np_order_hub_deleted_sync_limit']) ? absint($_POST['np_order_hub_deleted_sync_limit']) : 250;
+            $result = np_order_hub_sync_deleted_orders($limit);
+            if (is_wp_error($result)) {
+                $queue_notice = array(
+                    'type' => 'error',
+                    'message' => $result->get_error_message(),
+                );
+            } else {
+                $queue_notice = array(
+                    'type' => 'updated',
+                    'message' => sprintf(
+                        'Deleted-order sync done. Checked: %d, removed from hub: %d, missing API creds: %d, auth errors: %d, other errors: %d.',
+                        (int) ($result['checked'] ?? 0),
+                        (int) ($result['removed'] ?? 0),
+                        (int) ($result['missing_api'] ?? 0),
+                        (int) ($result['auth_errors'] ?? 0),
+                        (int) ($result['other_errors'] ?? 0)
+                    ),
+                );
+            }
         } elseif ($action === 'retry_job') {
             $job_key = sanitize_text_field((string) ($_POST['np_order_hub_print_job_key'] ?? ''));
             $retry = np_order_hub_print_queue_retry_now($job_key);
@@ -79,6 +229,14 @@ function np_order_hub_debug_page() {
     echo '<form method="post" style="margin:10px 0 14px;">';
     wp_nonce_field('np_order_hub_debug_print_queue');
     echo '<button class="button button-primary" type="submit" name="np_order_hub_print_queue_action" value="run_due">Run due jobs now</button>';
+    echo '</form>';
+    echo '<form method="post" style="margin:0 0 18px;">';
+    wp_nonce_field('np_order_hub_debug_print_queue');
+    echo '<input type="hidden" name="np_order_hub_print_queue_action" value="sync_deleted" />';
+    echo '<label for="np-order-hub-deleted-sync-limit" style="margin-right:8px;">Check latest records:</label>';
+    echo '<input id="np-order-hub-deleted-sync-limit" name="np_order_hub_deleted_sync_limit" type="number" min="10" max="2000" value="250" style="width:90px; margin-right:8px;" />';
+    echo '<button class="button" type="submit">Sync already deleted orders</button>';
+    echo '<p class="description" style="margin-top:6px;">Checks latest hub records against WooCommerce API and removes orders that no longer exist on subsite.</p>';
     echo '</form>';
 
     if (empty($jobs)) {
