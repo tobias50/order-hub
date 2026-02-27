@@ -99,8 +99,38 @@ function np_order_hub_print_queue_finish_claimed_job($job_key, $claim_id, $succe
     return np_order_hub_print_queue_build_agent_payload($job_key, $job);
 }
 
+function np_order_hub_print_queue_cron_schedules($schedules) {
+    if (!is_array($schedules)) {
+        $schedules = array();
+    }
+    if (empty($schedules['np_order_hub_1min'])) {
+        $schedules['np_order_hub_1min'] = array(
+            'interval' => 60,
+            'display' => 'Every minute (Order Hub)',
+        );
+    }
+    return $schedules;
+}
+
+function np_order_hub_print_queue_schedule_tick() {
+    if (!function_exists('wp_next_scheduled') || !function_exists('wp_schedule_event')) {
+        return;
+    }
+    if (!wp_next_scheduled(NP_ORDER_HUB_PRINT_QUEUE_TICK_EVENT)) {
+        wp_schedule_event(time() + 30, 'np_order_hub_1min', NP_ORDER_HUB_PRINT_QUEUE_TICK_EVENT);
+    }
+}
+
+function np_order_hub_print_queue_tick() {
+    np_order_hub_print_queue_release_stale_printing_jobs();
+    np_order_hub_print_queue_run_due_jobs(20);
+}
+
+add_filter('cron_schedules', 'np_order_hub_print_queue_cron_schedules');
+add_action('init', 'np_order_hub_print_queue_schedule_tick');
 add_action('rest_api_init', 'np_order_hub_register_routes');
 add_action(NP_ORDER_HUB_PRINT_QUEUE_EVENT, 'np_order_hub_process_print_job', 10, 1);
+add_action(NP_ORDER_HUB_PRINT_QUEUE_TICK_EVENT, 'np_order_hub_print_queue_tick');
 
 function np_order_hub_register_routes() {
     register_rest_route('np-order-hub/v1', '/webhook', array(
@@ -145,11 +175,17 @@ function np_order_hub_print_agent_claim(WP_REST_Request $request) {
     np_order_hub_print_queue_run_due_jobs(10);
     $job = np_order_hub_print_queue_claim_next_ready_job($agent_name);
     if (!is_array($job) || empty($job['job_key'])) {
+        np_order_hub_print_agent_update_heartbeat($agent_name, 'claim', array('status' => 'empty'));
         return new WP_REST_Response(array(
             'status' => 'empty',
             'server_time_gmt' => gmdate('Y-m-d H:i:s'),
         ), 200);
     }
+
+    np_order_hub_print_agent_update_heartbeat($agent_name, 'claim', array(
+        'status' => 'claimed',
+        'job_key' => (string) $job['job_key'],
+    ));
 
     return new WP_REST_Response(array(
         'status' => 'claimed',
@@ -173,6 +209,10 @@ function np_order_hub_print_agent_finish(WP_REST_Request $request) {
     }
     $error_message = sanitize_text_field((string) $request->get_param('error'));
     $result = np_order_hub_print_queue_finish_claimed_job($job_key, $claim_id, (bool) $success, $error_message);
+    np_order_hub_print_agent_update_heartbeat('', 'finish', array(
+        'status' => $success ? 'success' : 'failed',
+        'job_key' => $job_key,
+    ));
     if (is_wp_error($result)) {
         return new WP_REST_Response(array(
             'error' => $result->get_error_message(),

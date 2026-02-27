@@ -22,6 +22,7 @@ set -euo pipefail
 #   LABEL_WIDTH_MM defaults to 102.7
 #   LABEL_HEIGHT_MM defaults to 190
 #   LP_RASTERIZE_LABEL defaults to true
+#   LP_VERIFY_SECONDS defaults to 45 (wait for CUPS queue acceptance/completion signal)
 #   Note: when claim payload includes `packing_url` + `label_url`, agent prints them as two
 #         independent print jobs (packing first, then label) to avoid multi-page PDF quirks.
 #
@@ -49,6 +50,7 @@ LP_RASTER_DPI="${LP_RASTER_DPI:-300}"
 LABEL_WIDTH_MM="${LABEL_WIDTH_MM:-102.7}"
 LABEL_HEIGHT_MM="${LABEL_HEIGHT_MM:-190}"
 LP_RASTERIZE_LABEL="${LP_RASTERIZE_LABEL:-true}"
+LP_VERIFY_SECONDS="${LP_VERIFY_SECONDS:-45}"
 LP_MEDIA_RESOLVED=""
 
 if [[ -z "${PRINT_TOKEN}" ]]; then
@@ -381,6 +383,60 @@ except Exception as exc:
 PY
 }
 
+extract_lp_job_id() {
+  local lp_output="$1"
+  /usr/bin/python3 - "${lp_output}" <<'PY'
+import re
+import sys
+
+text = sys.argv[1] if len(sys.argv) > 1 else ""
+# Typical CUPS format: "request id is Zebra-123 (1 file(s))"
+m = re.search(r"request id is [^-\\s]+-(\\d+)", text, re.IGNORECASE)
+if m:
+    print(m.group(1))
+PY
+}
+
+verify_lp_submission() {
+  local lp_output="$1"
+  local stage_label="$2"
+
+  if ! command -v lpstat >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local job_id
+  job_id="$(extract_lp_job_id "${lp_output}")"
+  if [[ -z "${job_id}" ]]; then
+    # If we cannot parse job-id, accept lp success as best-effort fallback.
+    return 0
+  fi
+
+  local queue_id="${PRINTER_NAME}-${job_id}"
+  local end_ts
+  end_ts=$(( $(date +%s) + LP_VERIFY_SECONDS ))
+
+  while [[ $(date +%s) -le ${end_ts} ]]; do
+    # If printer queue is disabled, treat as print failure.
+    if lpstat -p "${PRINTER_NAME}" 2>/dev/null | grep -qi 'disabled'; then
+      echo "printer_disabled (${stage_label})"
+      return 1
+    fi
+
+    # Job still queued: keep waiting.
+    if lpstat -W not-completed -o "${PRINTER_NAME}" 2>/dev/null | grep -q "${queue_id}"; then
+      sleep 2
+      continue
+    fi
+
+    # Job left queue; consider this successful handoff to printer.
+    return 0
+  done
+
+  echo "spool_timeout (${stage_label}, job=${queue_id})"
+  return 1
+}
+
 LP_MEDIA_RESOLVED="$(resolve_lp_media "$LP_MEDIA")"
 if [[ -z "$LP_MEDIA_RESOLVED" ]]; then
   LP_MEDIA_RESOLVED="Custom.${LABEL_WIDTH_MM}x${LABEL_HEIGHT_MM}mm"
@@ -441,6 +497,11 @@ if [[ -n "${packing_url:-}" && -n "${label_url:-}" ]]; then
       rm -f "${packing_path}" "${packing_png_path}" "${label_path}" "${label_png_path}" || true
       exit 1
     fi
+    if ! verify_err="$(verify_lp_submission "${lp_out_1}" "packing slip")"; then
+      finish_job "${job_key}" "${claim_id}" "false" "${verify_err}"
+      rm -f "${packing_path}" "${packing_png_path}" "${label_path}" "${label_png_path}" || true
+      exit 1
+    fi
     sleep 1
 
     echo "Printing shipping label..."
@@ -455,6 +516,11 @@ if [[ -n "${packing_url:-}" && -n "${label_url:-}" ]]; then
       else
         finish_job "${job_key}" "${claim_id}" "false" "lp failed (code ${lp_exit}) shipping label: ${lp_out_2}"
       fi
+      rm -f "${packing_path}" "${packing_png_path}" "${label_path}" "${label_png_path}" || true
+      exit 1
+    fi
+    if ! verify_err="$(verify_lp_submission "${lp_out_2}" "shipping label")"; then
+      finish_job "${job_key}" "${claim_id}" "false" "${verify_err}"
       rm -f "${packing_path}" "${packing_png_path}" "${label_path}" "${label_png_path}" || true
       exit 1
     fi
@@ -494,6 +560,10 @@ if [[ "${split_enabled}" == "true" && "${pages}" =~ ^[0-9]+$ && "${pages}" -ge 2
     fi
     exit 1
   fi
+  if ! verify_err="$(verify_lp_submission "${lp_out_1}" "page 1")"; then
+    finish_job "${job_key}" "${claim_id}" "false" "${verify_err}"
+    exit 1
+  fi
   sleep 1
   if ! lp_out_2="$(run_lp "${local_path}" "2")"; then
     lp_exit=$?
@@ -504,6 +574,10 @@ if [[ "${split_enabled}" == "true" && "${pages}" =~ ^[0-9]+$ && "${pages}" -ge 2
     fi
     exit 1
   fi
+  if ! verify_err="$(verify_lp_submission "${lp_out_2}" "page 2")"; then
+    finish_job "${job_key}" "${claim_id}" "false" "${verify_err}"
+    exit 1
+  fi
   finish_job "${job_key}" "${claim_id}" "true" ""
   rm -f "${local_path}" || true
   echo "Printed split pages: ${job_key} (p1: ${lp_out_1}; p2: ${lp_out_2})"
@@ -511,6 +585,10 @@ if [[ "${split_enabled}" == "true" && "${pages}" =~ ^[0-9]+$ && "${pages}" -ge 2
 fi
 
 if lp_out="$(run_lp "${local_path}")"; then
+  if ! verify_err="$(verify_lp_submission "${lp_out}" "merged document")"; then
+    finish_job "${job_key}" "${claim_id}" "false" "${verify_err}"
+    exit 1
+  fi
   finish_job "${job_key}" "${claim_id}" "true" ""
   rm -f "${local_path}" || true
   echo "Printed: ${job_key} (${lp_out})"

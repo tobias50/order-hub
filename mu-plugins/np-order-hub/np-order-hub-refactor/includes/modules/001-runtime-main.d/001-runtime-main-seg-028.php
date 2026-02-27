@@ -1177,6 +1177,24 @@ function np_order_hub_debug_page() {
         }
         return $a_time > $b_time ? -1 : 1;
     });
+    $heartbeat = np_order_hub_print_agent_get_heartbeat();
+    $heartbeat_last_seen_gmt = isset($heartbeat['last_seen_gmt']) ? (string) $heartbeat['last_seen_gmt'] : '';
+    $heartbeat_last_seen_ts = $heartbeat_last_seen_gmt !== '' ? strtotime($heartbeat_last_seen_gmt . ' GMT') : 0;
+    $heartbeat_is_stale = false;
+    if ($heartbeat_last_seen_ts > 0) {
+        $heartbeat_is_stale = (time() - $heartbeat_last_seen_ts) > (NP_ORDER_HUB_PRINT_QUEUE_RETRY_SECONDS * 5);
+    }
+    $has_active_print_jobs = false;
+    foreach ($jobs as $queue_job) {
+        if (!is_array($queue_job)) {
+            continue;
+        }
+        $queue_status = isset($queue_job['status']) ? (string) $queue_job['status'] : '';
+        if (in_array($queue_status, array('pending', 'retry', 'running', 'ready', 'printing'), true)) {
+            $has_active_print_jobs = true;
+            break;
+        }
+    }
 
     echo '<div class="wrap">';
     echo '<h1>Order Hub Debug</h1>';
@@ -1191,9 +1209,29 @@ function np_order_hub_debug_page() {
     echo '<p>Queued for root stores only, status <code>processing</code>, bucket <code>Levering 3-5 dager</code>. Delay: 4 min. Retry: every 60 sec.</p>';
     $claim_url = rest_url('np-order-hub/v1/print-agent/claim');
     $finish_url = rest_url('np-order-hub/v1/print-agent/finish');
+    $heartbeat_agent = isset($heartbeat['agent_name']) ? (string) $heartbeat['agent_name'] : '';
+    $heartbeat_event = isset($heartbeat['last_event']) ? (string) $heartbeat['last_event'] : '';
+    $heartbeat_status = isset($heartbeat['status']) ? (string) $heartbeat['status'] : '';
+    $heartbeat_local = $heartbeat_last_seen_gmt !== '' ? get_date_from_gmt($heartbeat_last_seen_gmt, 'd.m.y H:i:s') : 'never';
     echo '<p><strong>Print agent claim URL:</strong> <code>' . esc_html($claim_url) . '</code><br />';
     echo '<strong>Print agent finish URL:</strong> <code>' . esc_html($finish_url) . '</code><br />';
-    echo '<strong>Print agent token:</strong> <code>' . esc_html($agent_token) . '</code></p>';
+    echo '<strong>Print agent token:</strong> <code>' . esc_html($agent_token) . '</code><br />';
+    echo '<strong>Last print-agent heartbeat:</strong> ' . esc_html($heartbeat_local);
+    if ($heartbeat_agent !== '') {
+        echo ' (' . esc_html($heartbeat_agent) . ')';
+    }
+    if ($heartbeat_event !== '') {
+        echo ' [' . esc_html($heartbeat_event) . ']';
+    }
+    if ($heartbeat_status !== '') {
+        echo ' status=' . esc_html($heartbeat_status);
+    }
+    echo '</p>';
+    if ($has_active_print_jobs && ($heartbeat_last_seen_ts < 1 || $heartbeat_is_stale)) {
+        echo '<div class="notice notice-warning inline"><p>';
+        echo 'Print agent virker inaktiv, men køen har aktive jobber. Sjekk LaunchAgent/logg på lager-Mac.';
+        echo '</p></div>';
+    }
     echo '<form method="post" style="margin:0 0 10px;">';
     wp_nonce_field('np_order_hub_debug_print_queue');
     echo '<button class="button" type="submit" name="np_order_hub_print_agent_token_action" value="regenerate">Regenerate print token</button>';
@@ -1368,6 +1406,60 @@ function np_order_hub_debug_page() {
     echo '</div>';
 }
 
+function np_order_hub_discover_store_site_url($url) {
+    $base_url = np_order_hub_build_site_base_url($url);
+    if ($base_url === '') {
+        return '';
+    }
+
+    $probe_url = trailingslashit($base_url) . 'wp-json/';
+    $response = wp_remote_get($probe_url, array(
+        'timeout' => 12,
+        'redirection' => 5,
+        'headers' => array(
+            'Accept' => 'application/json',
+        ),
+    ));
+    if (is_wp_error($response)) {
+        return '';
+    }
+
+    $candidate = '';
+    $body = wp_remote_retrieve_body($response);
+    if (is_string($body) && $body !== '') {
+        $decoded = json_decode($body, true);
+        if (is_array($decoded)) {
+            foreach (array('url', 'home') as $field) {
+                if (!empty($decoded[$field]) && is_string($decoded[$field])) {
+                    $candidate = np_order_hub_build_site_base_url($decoded[$field]);
+                    if ($candidate !== '') {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if ($candidate === '') {
+        $location = wp_remote_retrieve_header($response, 'location');
+        if (is_array($location)) {
+            $location = end($location);
+        }
+        if (is_string($location) && $location !== '') {
+            $candidate = np_order_hub_build_site_base_url($location);
+        }
+    }
+
+    if ($candidate === '' && isset($response['http_response']) && is_object($response['http_response']) && method_exists($response['http_response'], 'get_response_object')) {
+        $response_object = $response['http_response']->get_response_object();
+        if (is_object($response_object) && !empty($response_object->url)) {
+            $candidate = np_order_hub_build_site_base_url((string) $response_object->url);
+        }
+    }
+
+    return $candidate;
+}
+
 function np_order_hub_stores_page() {
     if (!current_user_can('manage_options')) {
         return;
@@ -1530,6 +1622,36 @@ function np_order_hub_stores_page() {
         }
     }
 
+    if (!empty($_GET['action']) && $_GET['action'] === 'refresh_store_url' && !empty($_GET['store'])) {
+        check_admin_referer('np_order_hub_refresh_store_url');
+        $store_key = sanitize_key((string) $_GET['store']);
+        if (empty($stores[$store_key]) || !is_array($stores[$store_key])) {
+            echo '<div class="error"><p>Store not found.</p></div>';
+        } else {
+            $store = $stores[$store_key];
+            $current_url = isset($store['url']) ? (string) $store['url'] : '';
+            $discovered_url = np_order_hub_discover_store_site_url($current_url);
+            if ($discovered_url === '') {
+                echo '<div class="error"><p>Could not detect a new URL automatically. Use Edit to update manually.</p></div>';
+            } else {
+                $current_normalized = np_order_hub_normalize_store_url($current_url);
+                $discovered_normalized = np_order_hub_normalize_store_url($discovered_url);
+                if ($current_normalized === $discovered_normalized) {
+                    echo '<div class="notice notice-info"><p>Store URL is already up to date.</p></div>';
+                } else {
+                    $store['url'] = $discovered_url;
+                    $upsert = np_order_hub_store_upsert($store);
+                    if (is_wp_error($upsert)) {
+                        echo '<div class="error"><p>' . esc_html($upsert->get_error_message()) . '</p></div>';
+                    } else {
+                        $stores = np_order_hub_get_stores();
+                        echo '<div class="updated"><p>Store URL updated: <code>' . esc_html($current_url) . '</code> &rarr; <code>' . esc_html($discovered_url) . '</code>.</p></div>';
+                    }
+                }
+            }
+        }
+    }
+
     if (!empty($_GET['action']) && $_GET['action'] === 'delete_store' && !empty($_GET['store'])) {
         check_admin_referer('np_order_hub_delete_store');
         $store_key = sanitize_key((string) $_GET['store']);
@@ -1588,6 +1710,10 @@ function np_order_hub_stores_page() {
                 admin_url('admin.php?page=np-order-hub-stores&action=delete_store&store=' . urlencode($store['key'])),
                 'np_order_hub_delete_store'
             );
+            $refresh_url = wp_nonce_url(
+                admin_url('admin.php?page=np-order-hub-stores&action=refresh_store_url&store=' . urlencode($store['key'])),
+                'np_order_hub_refresh_store_url'
+            );
             $webhook_url = add_query_arg('store', $store['key'], $webhook_base);
             echo '<tr>';
             echo '<td>' . esc_html($store['name']) . '</td>';
@@ -1634,7 +1760,7 @@ function np_order_hub_stores_page() {
             $api_label = (!empty($store['consumer_key']) && !empty($store['consumer_secret'])) ? 'Configured' : '—';
             echo '<td>' . esc_html($api_label) . '</td>';
             echo '<td><code>' . esc_html($webhook_url) . '</code></td>';
-            echo '<td><a class="button button-small" href="' . esc_url($edit_url) . '">Edit</a> <a class="button button-small" href="' . esc_url($delete_url) . '" onclick="return confirm(\'Remove this store?\')">Remove</a></td>';
+            echo '<td><a class="button button-small" href="' . esc_url($edit_url) . '">Edit</a> <a class="button button-small" href="' . esc_url($refresh_url) . '" onclick="return confirm(\'Try to auto-update this store URL?\')">Refresh URL</a> <a class="button button-small" href="' . esc_url($delete_url) . '" onclick="return confirm(\'Remove this store?\')">Remove</a></td>';
             echo '</tr>';
         }
     }

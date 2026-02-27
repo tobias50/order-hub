@@ -111,6 +111,37 @@ function np_order_hub_print_agent_is_authorized(WP_REST_Request $request) {
     return hash_equals($expected, $provided);
 }
 
+function np_order_hub_print_agent_update_heartbeat($agent_name = '', $event = 'claim', $meta = array()) {
+    $state = get_option(NP_ORDER_HUB_PRINT_AGENT_HEARTBEAT_OPTION, array());
+    if (!is_array($state)) {
+        $state = array();
+    }
+
+    $state['last_seen_gmt'] = gmdate('Y-m-d H:i:s');
+    $state['last_event'] = sanitize_key((string) $event);
+
+    $agent_name = sanitize_text_field((string) $agent_name);
+    if ($agent_name !== '') {
+        $state['agent_name'] = $agent_name;
+    }
+
+    if (is_array($meta) && !empty($meta)) {
+        if (isset($meta['status'])) {
+            $state['status'] = sanitize_key((string) $meta['status']);
+        }
+        if (isset($meta['job_key'])) {
+            $state['job_key'] = sanitize_text_field((string) $meta['job_key']);
+        }
+    }
+
+    update_option(NP_ORDER_HUB_PRINT_AGENT_HEARTBEAT_OPTION, $state, false);
+}
+
+function np_order_hub_print_agent_get_heartbeat() {
+    $state = get_option(NP_ORDER_HUB_PRINT_AGENT_HEARTBEAT_OPTION, array());
+    return is_array($state) ? $state : array();
+}
+
 function np_order_hub_print_queue_append_log(&$job, $message) {
     $message = trim((string) $message);
     if ($message === '') {

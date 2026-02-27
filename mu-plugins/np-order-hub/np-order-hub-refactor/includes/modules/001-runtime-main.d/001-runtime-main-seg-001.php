@@ -43,11 +43,13 @@ define('NP_ORDER_HUB_HELP_SCOUT_AUTO_LOOKUP_OPTION', 'np_order_hub_help_scout_au
 define('NP_ORDER_HUB_CONNECTOR_SETUP_KEY_OPTION', 'np_order_hub_connector_setup_key');
 define('NP_ORDER_HUB_PRINT_QUEUE_OPTION', 'np_order_hub_print_queue_jobs');
 define('NP_ORDER_HUB_PRINT_QUEUE_EVENT', 'np_order_hub_process_print_job');
+define('NP_ORDER_HUB_PRINT_QUEUE_TICK_EVENT', 'np_order_hub_print_queue_tick');
 define('NP_ORDER_HUB_PRINT_QUEUE_DELAY_SECONDS', 240);
 define('NP_ORDER_HUB_PRINT_QUEUE_RETRY_SECONDS', 60);
 define('NP_ORDER_HUB_PRINT_QUEUE_MAX_ATTEMPTS', 20);
 define('NP_ORDER_HUB_PRINT_AGENT_TOKEN_OPTION', 'np_order_hub_print_agent_token');
 define('NP_ORDER_HUB_PRINT_AGENT_CLAIM_TIMEOUT_SECONDS', 300);
+define('NP_ORDER_HUB_PRINT_AGENT_HEARTBEAT_OPTION', 'np_order_hub_print_agent_heartbeat');
 define('NP_ORDER_HUB_PRODUCTION_ERROR_SOURCE_QR', 'qr');
 
 function np_order_hub_tempnam($prefix = 'np-order-hub') {

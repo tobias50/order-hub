@@ -248,22 +248,37 @@ function np_order_hub_fetch_pdf_document($url, $document_name = 'Document') {
 }
 
 function np_order_hub_print_queue_fetch_label_pdf($store, $order_id, $packing_url = '', $payload = array()) {
-    $order = np_order_hub_fetch_store_order_via_wc_api($store, $order_id);
-    if (is_wp_error($order)) {
-        return $order;
+    $label_url = '';
+    $wc_api_error = null;
+    $has_payload = is_array($payload) && !empty($payload);
+
+    if ($has_payload) {
+        $label_url = np_order_hub_extract_proteria_label_url($payload, $packing_url);
     }
-    $source = $order;
-    if (is_array($payload) && !empty($payload)) {
-        $source = array(
-            'payload' => $payload,
-            'order' => $order,
-        );
+
+    if ($label_url === '') {
+        $order = np_order_hub_fetch_store_order_via_wc_api($store, $order_id);
+        if (is_wp_error($order)) {
+            $wc_api_error = $order;
+        } else {
+            $source = $order;
+            if ($has_payload) {
+                $source = array(
+                    'payload' => $payload,
+                    'order' => $order,
+                );
+            }
+            $label_url = np_order_hub_extract_proteria_label_url($source, $packing_url);
+        }
     }
-    $label_url = np_order_hub_extract_proteria_label_url($source, $packing_url);
+
     if ($label_url === '') {
         $label_url = np_order_hub_build_shipping_label_url($store, $order_id);
     }
     if ($label_url === '') {
+        if (is_wp_error($wc_api_error)) {
+            return $wc_api_error;
+        }
         return new WP_Error('print_label_missing', 'Proteria label URL not found on order yet.');
     }
     $pdf = np_order_hub_fetch_pdf_document($label_url, 'Shipping label');
