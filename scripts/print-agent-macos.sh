@@ -122,10 +122,12 @@ except Exception:
     data = {}
 
 status = str(data.get("status", ""))
+error = str(data.get("error", ""))
 job = data.get("job") if isinstance(data.get("job"), dict) else {}
 
 parts = [
     status,
+    error,
     str(job.get("job_key", "")),
     str(job.get("claim_id", "")),
     str(job.get("document_url", "")),
@@ -140,9 +142,13 @@ PY
 
 rm -f "${claim_tmp}"
 
-IFS=$'\t' read -r status job_key claim_id document_url document_filename order_id packing_url label_url <<<"${claim_data}"
+IFS=$'\t' read -r status claim_error job_key claim_id document_url document_filename order_id packing_url label_url <<<"${claim_data}"
 
 if [[ "${status}" != "claimed" ]]; then
+  if [[ "${status}" != "empty" ]]; then
+    echo "Claim failed: status='${status}' error='${claim_error}'" >&2
+    exit 1
+  fi
   exit 0
 fi
 
