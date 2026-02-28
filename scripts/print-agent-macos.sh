@@ -111,8 +111,9 @@ if ! claim_response="$(curl -sS --connect-timeout 10 --max-time "${CURL_TIMEOUT_
   exit 1
 fi
 
-claim_data="$(/usr/bin/python3 - "${claim_response}" <<'PY'
+claim_assignments="$(/usr/bin/python3 - "${claim_response}" <<'PY'
 import json
+import shlex
 import sys
 
 raw = sys.argv[1] if len(sys.argv) > 1 else ""
@@ -122,23 +123,27 @@ except Exception:
     data = {}
 
 job = data.get("job") if isinstance(data.get("job"), dict) else {}
-parts = [
-    str(data.get("status", "")),
-    str(data.get("error", "")),
-    str(job.get("job_key", "")),
-    str(job.get("claim_id", "")),
-    str(job.get("document_url", "")),
-    str(job.get("document_filename", "")),
-    str(job.get("order_id", "")),
-    str(job.get("packing_url", "")),
-    str(job.get("label_url", "")),
-]
-safe = [p.replace("\x1f", " ").replace("\n", " ").replace("\r", " ") for p in parts]
-print("\x1f".join(safe))
+
+values = {
+    "status": data.get("status", ""),
+    "claim_error": data.get("error", ""),
+    "job_key": job.get("job_key", ""),
+    "claim_id": job.get("claim_id", ""),
+    "document_url": job.get("document_url", ""),
+    "document_filename": job.get("document_filename", ""),
+    "order_id": job.get("order_id", ""),
+    "packing_url": job.get("packing_url", ""),
+    "label_url": job.get("label_url", ""),
+}
+
+for key, value in values.items():
+    if value is None:
+        value = ""
+    text = str(value).replace("\r", " ").replace("\n", " ")
+    print(f"{key}={shlex.quote(text)}")
 PY
 )"
-
-IFS=$'\x1f' read -r status claim_error job_key claim_id document_url document_filename order_id packing_url label_url <<<"${claim_data}"
+eval "${claim_assignments}"
 
 if [[ "${status}" != "claimed" ]]; then
     if [[ "${status}" != "empty" ]]; then
