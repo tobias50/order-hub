@@ -106,28 +106,25 @@ finish_job() {
 }
 
 claim_payload="$(build_json "agent=${AGENT_NAME}")"
-claim_tmp="$(/usr/bin/mktemp "${TMP_DIR}/claim.XXXXXX")"
+if ! claim_response="$(curl -sS --connect-timeout 10 --max-time "${CURL_TIMEOUT_SECONDS}" -X POST "${CLAIM_URL}" -H "X-NP-Print-Token: ${PRINT_TOKEN}" -H "Content-Type: application/json" --data "${claim_payload}")"; then
+  echo "Claim request failed (network/curl error)." >&2
+  exit 1
+fi
 
-curl -sS --connect-timeout 10 --max-time "${CURL_TIMEOUT_SECONDS}" -X POST "${CLAIM_URL}" -H "X-NP-Print-Token: ${PRINT_TOKEN}" -H "Content-Type: application/json" --data "${claim_payload}" -o "${claim_tmp}"
-
-claim_data="$(/usr/bin/python3 - "${claim_tmp}" <<'PY'
+claim_data="$(printf '%s' "${claim_response}" | /usr/bin/python3 <<'PY'
 import json
 import sys
 
-path = sys.argv[1]
+raw = sys.stdin.read()
 try:
-    with open(path, "r", encoding="utf-8") as fh:
-        data = json.load(fh)
+    data = json.loads(raw)
 except Exception:
     data = {}
 
-status = str(data.get("status", ""))
-error = str(data.get("error", ""))
 job = data.get("job") if isinstance(data.get("job"), dict) else {}
-
 parts = [
-    status,
-    error,
+    str(data.get("status", "")),
+    str(data.get("error", "")),
     str(job.get("job_key", "")),
     str(job.get("claim_id", "")),
     str(job.get("document_url", "")),
@@ -136,20 +133,27 @@ parts = [
     str(job.get("packing_url", "")),
     str(job.get("label_url", "")),
 ]
-print("\t".join(p.replace("\t", " ").replace("\n", " ") for p in parts))
+safe = [p.replace("\x1f", " ").replace("\n", " ").replace("\r", " ") for p in parts]
+print("\x1f".join(safe))
 PY
 )"
 
-rm -f "${claim_tmp}"
-
-IFS=$'\t' read -r status claim_error job_key claim_id document_url document_filename order_id packing_url label_url <<<"${claim_data}"
+IFS=$'\x1f' read -r status claim_error job_key claim_id document_url document_filename order_id packing_url label_url <<<"${claim_data}"
 
 if [[ "${status}" != "claimed" ]]; then
-  if [[ "${status}" != "empty" ]]; then
+    if [[ "${status}" != "empty" ]]; then
     echo "Claim failed: status='${status}' error='${claim_error}'" >&2
     exit 1
   fi
   exit 0
+fi
+
+if [[ "${document_url}" != http://* && "${document_url}" != https://* ]]; then
+  echo "Claim payload missing/invalid document_url: '${document_url}'" >&2
+  if [[ -n "${job_key}" && -n "${claim_id}" ]]; then
+    finish_job "${job_key}" "${claim_id}" "false" "Claim payload missing document_url"
+  fi
+  exit 1
 fi
 
 if [[ -z "${job_key}" || -z "${claim_id}" || -z "${document_url}" ]]; then
