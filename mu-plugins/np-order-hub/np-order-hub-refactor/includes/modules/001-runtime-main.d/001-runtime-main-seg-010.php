@@ -177,9 +177,7 @@ function np_order_hub_print_agent_monitor_health() {
                 $examples[] = $label;
             }
 
-            $heartbeat_label = $last_seen_gmt !== '' ? get_date_from_gmt($last_seen_gmt, 'd.m.y H:i:s') : 'mangler';
             $message = 'Print-agent inaktiv. Aktive jobber i kø: ' . $active_count . '.';
-            $message .= ' Siste heartbeat: ' . $heartbeat_label . '.';
             if (!empty($examples)) {
                 $message .= ' Eksempler: ' . implode(', ', $examples) . '.';
             }
