@@ -126,15 +126,14 @@ function np_order_hub_maybe_notify_new_order($store, $order_number, $order_id, $
     if (empty($settings['enabled']) || $settings['user'] === '' || $settings['token'] === '') {
         return;
     }
-    $store_name = is_array($store) && !empty($store['name']) ? (string) $store['name'] : 'Store';
-    $label = $order_number !== '' ? ('#' . $order_number) : ('#' . $order_id);
-    $total_display = np_order_hub_format_money((float) $total, (string) $currency);
-    $status_label = $status !== '' ? ucwords(str_replace('-', ' ', (string) $status)) : '';
-    $message = 'Ny ordre ' . $store_name . ' ' . $label . ' - ' . $total_display;
-    if ($status_label !== '') {
-        $message .= ' (' . $status_label . ')';
+    $normalized_status = sanitize_key((string) $status);
+    if ($normalized_status !== 'processing') {
+        return;
     }
-    $title = $settings['title'] !== '' ? $settings['title'] : 'Order Hub';
+    $store_name = is_array($store) && !empty($store['name']) ? (string) $store['name'] : 'Store';
+    $total_display = np_order_hub_format_money((float) $total, (string) $currency);
+    $message = trim($store_name . ' ' . $total_display);
+    $title = 'Ny ordre';
     np_order_hub_send_pushover_message($title, $message);
 }
 

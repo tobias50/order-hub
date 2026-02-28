@@ -172,6 +172,10 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
             $existing_payload = $decoded_existing_payload;
         }
     }
+    $previous_status = '';
+    if (!empty($existing_payload['status'])) {
+        $previous_status = sanitize_key((string) $existing_payload['status']);
+    }
     $store_bucket = np_order_hub_get_active_store_delivery_bucket($store);
     // Delivery bucket styres kun fra hubens butikk-innstillinger.
     // Eksisterende ordre beholder tidligere bucket, nye ordre får aktiv butikk-bucket.
@@ -217,6 +221,9 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
                 'db_error' => $wpdb->last_error,
             )));
             return new WP_REST_Response(array('error' => 'db_update_failed'), 500);
+        }
+        if ($status === 'processing' && $previous_status !== 'processing') {
+            np_order_hub_maybe_notify_new_order($store, $order_number, $order_id, $status, $total, $currency);
         }
     } else {
         $record['created_at_gmt'] = $now_gmt;
