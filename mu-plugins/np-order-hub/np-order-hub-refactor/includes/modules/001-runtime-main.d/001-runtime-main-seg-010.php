@@ -99,6 +99,120 @@ function np_order_hub_print_queue_finish_claimed_job($job_key, $claim_id, $succe
     return np_order_hub_print_queue_build_agent_payload($job_key, $job);
 }
 
+function np_order_hub_print_queue_get_active_jobs($jobs) {
+    $active = array();
+    if (!is_array($jobs)) {
+        return $active;
+    }
+    foreach ($jobs as $job_key => $job) {
+        if (!is_array($job)) {
+            continue;
+        }
+        $status = isset($job['status']) ? (string) $job['status'] : '';
+        if (!in_array($status, array('pending', 'retry', 'running', 'ready', 'printing'), true)) {
+            continue;
+        }
+        $updated = isset($job['updated_at_gmt']) ? (string) $job['updated_at_gmt'] : '';
+        $updated_ts = $updated !== '' ? strtotime($updated . ' GMT') : 0;
+        $active[] = array(
+            'job_key' => (string) $job_key,
+            'status' => $status,
+            'order_id' => isset($job['order_id']) ? absint($job['order_id']) : 0,
+            'store_name' => isset($job['store_name']) ? (string) $job['store_name'] : '',
+            'updated_at_gmt' => $updated,
+            'updated_ts' => $updated_ts > 0 ? $updated_ts : 0,
+        );
+    }
+
+    usort($active, function ($a, $b) {
+        if ($a['updated_ts'] === $b['updated_ts']) {
+            return strcmp((string) $a['job_key'], (string) $b['job_key']);
+        }
+        return $a['updated_ts'] < $b['updated_ts'] ? -1 : 1;
+    });
+
+    return $active;
+}
+
+function np_order_hub_print_agent_monitor_health() {
+    $jobs = np_order_hub_print_queue_get_jobs();
+    $active = np_order_hub_print_queue_get_active_jobs($jobs);
+    $active_count = count($active);
+
+    $heartbeat = np_order_hub_print_agent_get_heartbeat();
+    $last_seen_gmt = isset($heartbeat['last_seen_gmt']) ? (string) $heartbeat['last_seen_gmt'] : '';
+    $last_seen_ts = $last_seen_gmt !== '' ? strtotime($last_seen_gmt . ' GMT') : 0;
+    $now = time();
+    $heartbeat_age = $last_seen_ts > 0 ? max(0, $now - $last_seen_ts) : PHP_INT_MAX;
+
+    $stale = $active_count > 0 && ($last_seen_ts < 1 || $heartbeat_age > NP_ORDER_HUB_PRINT_AGENT_STALE_SECONDS);
+
+    $monitor = get_option(NP_ORDER_HUB_PRINT_AGENT_MONITOR_OPTION, array());
+    if (!is_array($monitor)) {
+        $monitor = array();
+    }
+    $alert_open = !empty($monitor['alert_open']);
+    $last_alert_ts = isset($monitor['last_alert_ts']) ? (int) $monitor['last_alert_ts'] : 0;
+    $cooldown = max(60, (int) NP_ORDER_HUB_PRINT_AGENT_ALERT_COOLDOWN_SECONDS);
+    $changed = false;
+
+    $title_base = 'Order Hub';
+    if (function_exists('np_order_hub_get_pushover_settings')) {
+        $settings = np_order_hub_get_pushover_settings();
+        if (is_array($settings) && !empty($settings['title'])) {
+            $title_base = (string) $settings['title'];
+        }
+    }
+
+    if ($stale) {
+        $should_alert = !$alert_open || ($now - $last_alert_ts) >= $cooldown;
+        if ($should_alert) {
+            $examples = array();
+            foreach (array_slice($active, 0, 3) as $row) {
+                $label = '#' . (int) $row['order_id'];
+                if (!empty($row['store_name'])) {
+                    $label .= ' ' . $row['store_name'];
+                }
+                $label .= ' [' . $row['status'] . ']';
+                $examples[] = $label;
+            }
+
+            $heartbeat_label = $last_seen_gmt !== '' ? get_date_from_gmt($last_seen_gmt, 'd.m.y H:i:s') : 'mangler';
+            $message = 'Print-agent inaktiv. Aktive jobber i kø: ' . $active_count . '.';
+            $message .= ' Siste heartbeat: ' . $heartbeat_label . '.';
+            if (!empty($examples)) {
+                $message .= ' Eksempler: ' . implode(', ', $examples) . '.';
+            }
+
+            if (function_exists('np_order_hub_send_pushover_message')) {
+                np_order_hub_send_pushover_message($title_base . ' - Print Alert', $message);
+            }
+            $monitor['alert_open'] = 1;
+            $monitor['last_alert_ts'] = $now;
+            $monitor['last_alert_gmt'] = gmdate('Y-m-d H:i:s');
+            $monitor['last_alert_active_count'] = $active_count;
+            $monitor['last_alert_heartbeat_gmt'] = $last_seen_gmt;
+            $changed = true;
+        }
+    } else {
+        if ($alert_open) {
+            $heartbeat_label = $last_seen_gmt !== '' ? get_date_from_gmt($last_seen_gmt, 'd.m.y H:i:s') : 'ukjent';
+            $message = 'Print-agent er tilbake. Heartbeat: ' . $heartbeat_label . '. Aktive jobber i kø: ' . $active_count . '.';
+            if (function_exists('np_order_hub_send_pushover_message')) {
+                np_order_hub_send_pushover_message($title_base . ' - Print OK', $message);
+            }
+            $monitor['alert_open'] = 0;
+            $monitor['last_recovered_ts'] = $now;
+            $monitor['last_recovered_gmt'] = gmdate('Y-m-d H:i:s');
+            $changed = true;
+        }
+    }
+
+    if ($changed) {
+        update_option(NP_ORDER_HUB_PRINT_AGENT_MONITOR_OPTION, $monitor, false);
+    }
+}
+
 function np_order_hub_print_queue_cron_schedules($schedules) {
     if (!is_array($schedules)) {
         $schedules = array();
@@ -124,6 +238,7 @@ function np_order_hub_print_queue_schedule_tick() {
 function np_order_hub_print_queue_tick() {
     np_order_hub_print_queue_release_stale_printing_jobs();
     np_order_hub_print_queue_run_due_jobs(20);
+    np_order_hub_print_agent_monitor_health();
 }
 
 add_filter('cron_schedules', 'np_order_hub_print_queue_cron_schedules');
@@ -176,6 +291,7 @@ function np_order_hub_print_agent_claim(WP_REST_Request $request) {
     $job = np_order_hub_print_queue_claim_next_ready_job($agent_name);
     if (!is_array($job) || empty($job['job_key'])) {
         np_order_hub_print_agent_update_heartbeat($agent_name, 'claim', array('status' => 'empty'));
+        np_order_hub_print_agent_monitor_health();
         return new WP_REST_Response(array(
             'status' => 'empty',
             'server_time_gmt' => gmdate('Y-m-d H:i:s'),
@@ -186,6 +302,7 @@ function np_order_hub_print_agent_claim(WP_REST_Request $request) {
         'status' => 'claimed',
         'job_key' => (string) $job['job_key'],
     ));
+    np_order_hub_print_agent_monitor_health();
 
     return new WP_REST_Response(array(
         'status' => 'claimed',
@@ -213,6 +330,7 @@ function np_order_hub_print_agent_finish(WP_REST_Request $request) {
         'status' => $success ? 'success' : 'failed',
         'job_key' => $job_key,
     ));
+    np_order_hub_print_agent_monitor_health();
     if (is_wp_error($result)) {
         return new WP_REST_Response(array(
             'error' => $result->get_error_message(),

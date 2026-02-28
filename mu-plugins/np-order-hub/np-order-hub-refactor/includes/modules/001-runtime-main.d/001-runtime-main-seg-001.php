@@ -50,6 +50,9 @@ define('NP_ORDER_HUB_PRINT_QUEUE_MAX_ATTEMPTS', 20);
 define('NP_ORDER_HUB_PRINT_AGENT_TOKEN_OPTION', 'np_order_hub_print_agent_token');
 define('NP_ORDER_HUB_PRINT_AGENT_CLAIM_TIMEOUT_SECONDS', 300);
 define('NP_ORDER_HUB_PRINT_AGENT_HEARTBEAT_OPTION', 'np_order_hub_print_agent_heartbeat');
+define('NP_ORDER_HUB_PRINT_AGENT_MONITOR_OPTION', 'np_order_hub_print_agent_monitor');
+define('NP_ORDER_HUB_PRINT_AGENT_STALE_SECONDS', 300);
+define('NP_ORDER_HUB_PRINT_AGENT_ALERT_COOLDOWN_SECONDS', 900);
 define('NP_ORDER_HUB_PRODUCTION_ERROR_SOURCE_QR', 'qr');
 
 function np_order_hub_tempnam($prefix = 'np-order-hub') {

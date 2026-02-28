@@ -33,7 +33,7 @@ function np_order_hub_notifications_page() {
     wp_nonce_field('np_order_hub_save_notifications');
     echo '<table class="form-table">';
     echo '<tr><th scope="row">Enable Pushover</th><td>';
-    echo '<label><input type="checkbox" name="np_order_hub_pushover_enabled" value="1"' . checked($settings['enabled'], true, false) . ' /> Send notifications for new orders</label>';
+    echo '<label><input type="checkbox" name="np_order_hub_pushover_enabled" value="1"' . checked($settings['enabled'], true, false) . ' /> Send notifications for new orders and print-agent alerts</label>';
     echo '</td></tr>';
     echo '<tr><th scope="row">Logo attachment</th><td>';
     echo '<label><input type="checkbox" name="np_order_hub_pushover_logo_enabled" value="1"' . checked(!empty($settings['logo_enabled']), true, false) . ' /> Attach logo image to push notifications</label>';
@@ -125,6 +125,11 @@ function np_order_hub_revenue_dashboard_shortcode($atts) {
 
     if (!empty($rows)) {
         usort($rows, function ($a, $b) {
+            $total_a = isset($a['total']) ? (float) $a['total'] : 0.0;
+            $total_b = isset($b['total']) ? (float) $b['total'] : 0.0;
+            if ($total_a !== $total_b) {
+                return ($total_a < $total_b) ? 1 : -1;
+            }
             $store_cmp = strcmp((string) ($a['store_name'] ?? ''), (string) ($b['store_name'] ?? ''));
             if ($store_cmp !== 0) {
                 return $store_cmp;
@@ -206,41 +211,56 @@ function np_order_hub_revenue_dashboard_shortcode($atts) {
 
     ob_start();
     echo '<div class="np-order-hub-revenue-dashboard">';
-    $period_links = array();
-    $yearly_link = '';
+    $period_links_primary = array();
+    $period_links_extra = array();
+    $extra_period_keys = array('month_current', 'month_previous', 'yearly');
     foreach ($period_urls as $key => $url) {
         $active = $range['period'] === $key ? ' is-active' : '';
         $label = isset($period_labels[$key]) ? $period_labels[$key] : $key;
-        $link_html = '<a class="np-order-hub-period' . ($key === 'yearly' ? ' np-order-hub-period-yearly' : '') . $active . '" href="' . esc_url($url) . '">' . esc_html($label) . '</a>';
-        if ($key === 'yearly') {
-            $yearly_link = $link_html;
+        $is_extra_period = in_array($key, $extra_period_keys, true);
+        $period_class = $is_extra_period ? ' np-order-hub-period-extra' : ' np-order-hub-period-primary';
+        $link_html = '<a class="np-order-hub-period' . $period_class . $active . '" data-period="' . esc_attr($key) . '" href="' . esc_url($url) . '">' . esc_html($label) . '</a>';
+        if ($is_extra_period) {
+            $period_links_extra[] = $link_html;
         } else {
-            $period_links[] = $link_html;
+            $period_links_primary[] = $link_html;
         }
     }
+    $has_active_extra_period = in_array($range['period'], $extra_period_keys, true);
 
     echo '<div class="np-order-hub-vat-toggle-row">';
     echo '<div class="np-order-hub-vat-toggle">';
     echo '<a class="np-order-hub-vat-mode' . ($vat_mode === 'ex' ? ' is-active' : '') . '" href="' . esc_url($vat_mode_urls['ex']) . '">Eks mva</a>';
     echo '<a class="np-order-hub-vat-mode' . ($vat_mode === 'inc' ? ' is-active' : '') . '" href="' . esc_url($vat_mode_urls['inc']) . '">Inkl mva</a>';
     echo '</div>';
-    echo '</div>';
-    echo '<div class="np-order-hub-revenue-toolbar">';
-    echo '<div class="np-order-hub-revenue-controls">' . implode('', $period_links) . '</div>';
-    if ($yearly_link !== '') {
-        echo $yearly_link;
-    }
     echo '<form class="np-order-hub-custom-range" method="get" action="' . esc_url($base_url) . '">';
     echo '<input type="hidden" name="np_period" value="custom" />';
     echo '<input type="hidden" name="np_vat_mode" value="' . esc_attr($vat_mode) . '" />';
-    echo '<span class="np-order-hub-custom-label">Velg periode</span>';
-    echo '<div class="np-order-hub-custom-fields">';
-    echo '<input type="date" name="np_from" placeholder="29.01.26" value="' . esc_attr($custom_from_value) . '" />';
-    echo '<span>til</span>';
-    echo '<input type="date" name="np_to" placeholder="29.01.26" value="' . esc_attr($custom_to_value) . '" />';
-    echo '<button type="submit">Vis</button>';
-    echo '</div>';
+    echo '<input type="hidden" name="np_from" value="' . esc_attr($custom_from_value) . '" />';
+    echo '<input type="hidden" name="np_to" value="' . esc_attr($custom_to_value) . '" />';
+    echo '<button type="button" class="np-order-hub-date-dialog-toggle">Velg dato</button>';
     echo '</form>';
+    echo '</div>';
+    echo '<div class="np-order-hub-date-dialog" hidden>';
+    echo '<div class="np-order-hub-date-dialog-backdrop"></div>';
+    echo '<div class="np-order-hub-date-dialog-panel" role="dialog" aria-modal="true" aria-label="Velg dato">';
+    echo '<h3>Velg dato</h3>';
+    echo '<label>Fra<input class="np-order-hub-date-dialog-from" type="date" value="' . esc_attr($custom_from_value) . '" /></label>';
+    echo '<label>Til<input class="np-order-hub-date-dialog-to" type="date" value="' . esc_attr($custom_to_value) . '" /></label>';
+    echo '<div class="np-order-hub-date-dialog-actions">';
+    echo '<button type="button" class="np-order-hub-date-dialog-cancel">Avbryt</button>';
+    echo '<button type="button" class="np-order-hub-date-dialog-apply">Vis</button>';
+    echo '</div>';
+    echo '</div>';
+    echo '</div>';
+    echo '<div class="np-order-hub-revenue-toolbar">';
+    echo '<div class="np-order-hub-revenue-controls' . ($has_active_extra_period ? ' is-expanded' : '') . '">';
+    echo implode('', $period_links_primary);
+    if (!empty($period_links_extra)) {
+        echo '<button type="button" class="np-order-hub-periods-toggle" aria-expanded="' . ($has_active_extra_period ? 'true' : 'false') . '"><span>' . ($has_active_extra_period ? 'Se mindre' : 'Se mer') . '</span></button>';
+        echo '<div class="np-order-hub-periods-extra">' . implode('', $period_links_extra) . '</div>';
+    }
+    echo '</div>';
     echo '</div>';
     // Period meta hidden on request.
 
@@ -256,9 +276,10 @@ function np_order_hub_revenue_dashboard_shortcode($atts) {
     $avg_order_value = $total_orders > 0 ? ($selected_total_value / $total_orders) : 0.0;
     $avg_order_display = np_order_hub_format_money($avg_order_value, $currency_label);
     $avg_items_value = $total_orders > 0 ? ($total_items / $total_orders) : 0.0;
-    $avg_items_display = number_format($avg_items_value, 0, ',', ' ');
+    $avg_items_decimals = abs($avg_items_value - round($avg_items_value)) < 0.00001 ? 0 : 1;
+    $avg_items_display = number_format($avg_items_value, $avg_items_decimals, ',', ' ');
     echo '<div class="np-order-hub-revenue-metrics">';
-    echo '<div class="np-order-hub-metric np-order-hub-metric-primary"><div class="np-order-hub-metric-label">Omsetning</div><div class="np-order-hub-metric-value">' . esc_html($selected_total_display) . '</div><div class="np-order-hub-metric-mode">' . esc_html($selected_mode_label) . '</div></div>';
+    echo '<div class="np-order-hub-metric np-order-hub-metric-primary"><div class="np-order-hub-metric-value">' . esc_html($selected_total_display) . '</div><div class="np-order-hub-metric-mode">' . esc_html($selected_mode_label) . '</div></div>';
     echo '<div class="np-order-hub-metric"><div class="np-order-hub-metric-label">Ordre</div><div class="np-order-hub-metric-value">' . esc_html((string) $total_orders) . '</div></div>';
     echo '<div class="np-order-hub-metric"><div class="np-order-hub-metric-label">Plagg</div><div class="np-order-hub-metric-value">' . esc_html((string) $total_items) . '</div></div>';
     echo '<div class="np-order-hub-metric"><div class="np-order-hub-metric-label">Snitt ordre</div><div class="np-order-hub-metric-value">' . esc_html($avg_order_display) . '</div></div>';
@@ -269,6 +290,7 @@ function np_order_hub_revenue_dashboard_shortcode($atts) {
         echo '<p class="np-order-hub-multi-currency">Flere valutaer i resultatet.</p>';
     }
 
+    echo '<div class="np-order-hub-revenue-table-wrap">';
     echo '<table class="np-order-hub-revenue-table">';
     echo '<thead><tr><th>Butikk</th><th>Omsetning</th><th>Ordre</th><th>Plagg</th><th>Snitt ordre</th><th>Snitt plagg</th></tr></thead>';
     echo '<tbody>';
@@ -288,7 +310,8 @@ function np_order_hub_revenue_dashboard_shortcode($atts) {
             $avg_value = $row_count > 0 ? ($row_selected_value / $row_count) : 0.0;
             $avg_display = np_order_hub_format_money($avg_value, $row_currency);
             $avg_items = $row_count > 0 ? ($row_items / $row_count) : 0.0;
-            $avg_items_display = number_format($avg_items, 0, ',', ' ');
+            $avg_items_decimals = abs($avg_items - round($avg_items)) < 0.00001 ? 0 : 1;
+            $avg_items_display = number_format($avg_items, $avg_items_decimals, ',', ' ');
             $store_data = $store_key !== '' ? np_order_hub_get_store_by_key($store_key) : null;
             $store_orders_url = is_array($store_data) ? np_order_hub_build_admin_orders_url($store_data) : '';
             if ($store_orders_url === '' && $store_key !== '') {
@@ -318,42 +341,61 @@ function np_order_hub_revenue_dashboard_shortcode($atts) {
     echo '</tbody>';
     echo '</table>';
     echo '</div>';
+    echo '</div>';
 
     echo '<style>
         .np-order-hub-revenue-dashboard{width:85vw;max-width:85vw;margin:24px auto;font-family:inherit;box-sizing:border-box;margin-left:calc(50% - 42.5vw);margin-right:calc(50% - 42.5vw);font-size:16px;}
         .np-order-hub-revenue-dashboard *{font-size:16px;}
-        .np-order-hub-revenue-toolbar{display:flex;flex-wrap:nowrap;gap:12px;align-items:center;margin:8px 0 6px;overflow-x:auto;}
-        .np-order-hub-revenue-controls{display:flex;gap:8px;flex-wrap:nowrap;margin:0;white-space:nowrap;order:1;}
-        .np-order-hub-vat-toggle-row{display:flex;justify-content:flex-end;margin:0 0 12px;}
+        .np-order-hub-revenue-toolbar{display:flex;gap:12px;align-items:center;margin:8px 0 6px;overflow-x:auto;width:100%;max-width:100%;}
+        .np-order-hub-revenue-controls{display:flex;gap:8px;flex-wrap:nowrap;margin:0;white-space:nowrap;align-items:center;width:100%;}
+        .np-order-hub-periods-extra{display:flex;gap:8px;flex-wrap:nowrap;align-items:center;}
+        .np-order-hub-periods-toggle{display:none;align-items:center;justify-content:center;gap:6px;padding:8px 14px;border:1px solid #d0d6e1;border-radius:8px;background:#fff;color:#1f2937;cursor:pointer;white-space:nowrap;}
+        .np-order-hub-vat-toggle-row{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:0 0 12px;flex-wrap:nowrap;width:100%;max-width:100%;}
         .np-order-hub-vat-toggle{display:flex;gap:4px;flex-wrap:nowrap;padding:4px;border:1px solid #d0d6e1;border-radius:10px;background:#fff;font-size:13px;}
         .np-order-hub-vat-mode{padding:6px 12px;border-radius:7px;text-decoration:none;color:#1f2937;line-height:1.2;font-size:13px;}
         .np-order-hub-vat-mode.is-active{background:#111827;color:#fff;}
         .np-order-hub-period{padding:8px 14px;border:1px solid #d0d6e1;border-radius:8px;text-decoration:none;color:#1f2937;background:#fff;}
         .np-order-hub-period.is-active{background:#111827;color:#fff;border-color:#111827;}
-        .np-order-hub-period-yearly{order:2;white-space:nowrap;}
         .np-order-hub-period-meta{color:#6b7280;margin:0 0 16px;}
-        .np-order-hub-custom-range{order:3;margin:0 0 0 auto;display:flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap;justify-content:flex-end;text-align:right;}
-        .np-order-hub-custom-label{font-weight:600;color:#1f2937;}
-        .np-order-hub-custom-fields{display:flex;flex-wrap:nowrap;gap:8px;align-items:center;}
-        .np-order-hub-custom-fields input[type="date"]{padding:6px 8px;border:1px solid #d0d6e1;border-radius:6px;}
-        .np-order-hub-custom-fields button{padding:6px 12px;border-radius:6px;border:1px solid #111827;background:#111827;color:#fff;cursor:pointer;}
-        .np-order-hub-revenue-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:30px 0;width:100%;}
-        .np-order-hub-metric{display:flex;flex-direction:column;gap:4px;align-items:flex-start;background:#f8f9fc;border:1px solid #e5e7eb;border-radius:12px;padding:16px 20px;}
+        .np-order-hub-custom-range{margin:0;display:flex;align-items:center;flex:0 0 auto;}
+        .np-order-hub-date-dialog-toggle{padding:8px 14px;border-radius:8px;border:1px solid #d0d6e1;background:#fff;color:#1f2937;cursor:pointer;line-height:1.2;white-space:nowrap;}
+        .np-order-hub-date-dialog[hidden]{display:none !important;}
+        .np-order-hub-date-dialog{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;}
+        .np-order-hub-date-dialog-backdrop{position:absolute;inset:0;background:rgba(17,24,39,0.45);}
+        .np-order-hub-date-dialog-panel{position:relative;z-index:1;width:min(360px,100%);background:#fff;border-radius:12px;padding:14px;border:1px solid #d0d6e1;display:flex;flex-direction:column;gap:10px;}
+        .np-order-hub-date-dialog-panel h3{margin:0;font-size:16px;}
+        .np-order-hub-date-dialog-panel label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#374151;}
+        .np-order-hub-date-dialog-panel input[type="date"]{padding:8px;border:1px solid #d0d6e1;border-radius:8px;}
+        .np-order-hub-date-dialog-actions{display:flex;justify-content:flex-end;gap:8px;}
+        .np-order-hub-date-dialog-cancel,
+        .np-order-hub-date-dialog-apply{padding:7px 11px;border-radius:8px;border:1px solid #d0d6e1;background:#fff;color:#111827;cursor:pointer;font-size:13px;}
+        .np-order-hub-date-dialog-apply{border-color:#111827;background:#111827;color:#fff;}
+        .np-order-hub-revenue-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:30px 0;width:100%;box-sizing:border-box;}
+        .np-order-hub-metric{display:flex;flex-direction:column;gap:4px;align-items:flex-start;background:#f8f9fc;border:1px solid #e5e7eb;border-radius:12px;padding:16px 20px;box-sizing:border-box;}
+        .np-order-hub-metric-primary{border:1px solid #cfd6e2;}
         .np-order-hub-metric-value{font-size:20px;font-weight:700;}
         .np-order-hub-metric-label{color:#6b7280;}
-        .np-order-hub-metric-mode{font-size:13px;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;}
+        .np-order-hub-metric-mode{font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;}
         .np-order-hub-metrics-toggle{display:none;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:12px 16px;border-radius:12px;border:1px solid #e5e7eb;background:#fff;color:#111827;font-weight:600;cursor:pointer;}
         .np-order-hub-metrics-toggle::after{content:"↓";font-size:16px;line-height:1;}
         .np-order-hub-metrics-toggle[aria-expanded="true"]::after{content:"↑";}
         .np-order-hub-multi-currency{color:#b45309;margin:0 0 12px;}
-        .np-order-hub-revenue-table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;}
+        .np-order-hub-revenue-table-wrap{width:100%;max-width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;border:1px solid #e5e7eb;border-radius:12px;background:#fff;}
+        .np-order-hub-revenue-table{width:100%;min-width:840px;table-layout:fixed;border-collapse:collapse;background:#fff;}
         .np-order-hub-revenue-table th,
-        .np-order-hub-revenue-table td{padding:12px 14px;border-bottom:1px solid #eef2f7;text-align:left;}
+        .np-order-hub-revenue-table td{padding:12px 14px;border-bottom:1px solid #eef2f7;text-align:left;white-space:nowrap;}
+        .np-order-hub-revenue-table th:nth-child(1),
+        .np-order-hub-revenue-table td:nth-child(1){width:45%;}
+        .np-order-hub-revenue-table th:nth-child(2),
+        .np-order-hub-revenue-table td:nth-child(2){width:25%;}
         .np-order-hub-revenue-table th{background:#f8fafc;font-weight:600;}
         .np-order-hub-revenue-table tbody tr:last-child td{border-bottom:none;}
         .np-order-hub-debug-box{white-space:pre-wrap;background:#111827;color:#e5e7eb;padding:12px;border-radius:8px;font-size:16px;}
         body.np-order-hub-dashboard-page .wp-site-blocks > header,
         body.np-order-hub-dashboard-page .wp-site-blocks > footer{display:none !important;}
+        body.np-order-hub-dashboard-page main.wp-block-group.has-global-padding.is-layout-constrained.wp-block-group-is-layout-constrained{
+            margin-top:calc(var(--wp--preset--spacing--60, 21px) - 40px) !important;
+        }
         body.np-order-hub-dashboard-page .wp-block-group.alignfull.has-global-padding.is-layout-constrained.wp-block-group-is-layout-constrained{padding-top:0 !important;}
         body.np-order-hub-dashboard-page .wp-block-post-title,
         body.np-order-hub-dashboard-page .entry-content .wp-block-site-title,
@@ -366,28 +408,65 @@ function np_order_hub_revenue_dashboard_shortcode($atts) {
         body.np-order-hub-dashboard-page .wp-block-post-content p.has-small-font-size{display:none !important;}
         body.np-order-hub-dashboard-page .entry-content > .wp-block-spacer,
         body.np-order-hub-dashboard-page .wp-block-post-content > .wp-block-spacer{display:none !important;}
+        body.np-order-hub-dashboard-page .entry-content,
+        body.np-order-hub-dashboard-page .wp-block-post-content,
+        body.np-order-hub-dashboard-page .wp-block-group.alignfull.has-global-padding.is-layout-constrained.wp-block-group-is-layout-constrained{
+            width:100% !important;
+            max-width:100% !important;
+            margin-left:0 !important;
+            margin-right:0 !important;
+            padding-left:0 !important;
+            padding-right:0 !important;
+        }
+        body.np-order-hub-dashboard-page,
+        body.np-order-hub-dashboard-page .wp-site-blocks,
+        body.np-order-hub-dashboard-page .wp-block-post-content{overflow-x:hidden;}
+        body.np-order-hub-date-dialog-open{overflow:hidden;}
+        @media (min-width:769px){
+            .np-order-hub-revenue-toolbar{display:flex;align-items:center;gap:12px;overflow-x:visible;}
+            .np-order-hub-revenue-controls{flex:1 1 auto;width:auto;min-width:0;}
+            .np-order-hub-revenue-toolbar > .np-order-hub-vat-toggle{margin-left:auto;flex:0 0 auto;}
+            .np-order-hub-revenue-table-wrap{overflow-x:visible;overflow-y:visible;-webkit-overflow-scrolling:auto;}
+            .np-order-hub-revenue-table{min-width:0;}
+            .np-order-hub-revenue-table th:nth-child(1),
+            .np-order-hub-revenue-table td:nth-child(1){width:42%;}
+            .np-order-hub-revenue-table th:nth-child(n+2),
+            .np-order-hub-revenue-table td:nth-child(n+2){width:11.6%;text-align:center;}
+        }
         @media (max-width:768px){
-            .np-order-hub-revenue-dashboard{font-size:16px;width:100%;max-width:100%;margin:0 auto;box-sizing:border-box;padding:0;}
-            .np-order-hub-revenue-dashboard *{font-size:16px;}
-            .np-order-hub-revenue-toolbar{display:grid;grid-template-columns:auto 1fr;align-items:start;gap:8px 10px;overflow-x:visible;}
-            .np-order-hub-period-yearly{order:0;grid-column:1;}
-            .np-order-hub-revenue-controls{order:1;grid-column:1 / -1;flex-wrap:wrap;width:100%;}
-            .np-order-hub-custom-range{order:0;grid-column:2;justify-self:stretch;width:100%;}
-            .np-order-hub-vat-toggle-row{justify-content:flex-start;margin:0 0 10px;}
-            .np-order-hub-vat-toggle{width:fit-content;}
-            .np-order-hub-vat-mode{font-size:13px;}
-            .np-order-hub-custom-label{display:none;}
-            .np-order-hub-custom-fields{width:100%;display:grid;grid-template-columns:1fr auto 1fr auto;gap:6px;align-items:center;}
-            .np-order-hub-custom-fields input[type="date"]{width:100%;min-width:0;}
-            .np-order-hub-custom-fields button{padding:6px 10px;}
-            .np-order-hub-revenue-metrics{grid-template-columns:1fr;}
-            .np-order-hub-metric{width:100%;flex-direction:row;align-items:center;justify-content:space-between;}
+            .np-order-hub-revenue-dashboard{font-size:16px;width:100%;max-width:100%;margin:0;box-sizing:border-box;padding:0 5px 0 0;}
+            .np-order-hub-revenue-dashboard *{font-size:13px;}
+            .np-order-hub-revenue-toolbar{display:block;overflow-x:visible;width:100%;max-width:100%;}
+            .np-order-hub-revenue-controls{width:100%;min-width:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;align-items:stretch;}
+            .np-order-hub-period,
+            .np-order-hub-periods-toggle,
+            .np-order-hub-date-dialog-toggle{display:flex;align-items:center;justify-content:center;padding:6px 8px;border-radius:8px;font-size:13px;line-height:1.2;white-space:nowrap;}
+            .np-order-hub-period-primary{order:initial;}
+            .np-order-hub-custom-range{margin:0;width:100%;order:initial;}
+            .np-order-hub-custom-range .np-order-hub-date-dialog-toggle{width:100%;}
+            .np-order-hub-periods-toggle{display:flex;order:initial;margin-left:0;width:100%;}
+            .np-order-hub-periods-extra{display:none;grid-column:1 / -1;width:100%;gap:6px;flex-wrap:wrap;}
+            .np-order-hub-revenue-controls.is-expanded .np-order-hub-periods-extra{display:flex;}
+            .np-order-hub-vat-toggle-row{justify-content:flex-end;align-items:center;gap:6px;margin:0 0 10px;flex-wrap:nowrap;width:100%;max-width:100%;overflow:visible;}
+            .np-order-hub-vat-toggle{width:auto;flex:0 0 auto;gap:2px;padding:2px;border-radius:8px;margin-top:0px;margin-left:auto;}
+            .np-order-hub-vat-mode{font-size:11px;padding:5px 8px;}
+            .np-order-hub-date-dialog{padding:12px;}
+            .np-order-hub-date-dialog-panel{width:min(330px,100%);}
+            .np-order-hub-revenue-metrics{grid-template-columns:1fr;border:1px solid #cfd6e2;border-radius:12px;padding:0;overflow:hidden;margin:15px 0 9px 0;}
+            .np-order-hub-metric{width:100%;flex-direction:column;align-items:flex-start;justify-content:flex-start;}
             .np-order-hub-metric-value{font-size:20px;}
             .np-order-hub-metric-label{font-size:16px;}
             .np-order-hub-revenue-metrics:not(.is-expanded) .np-order-hub-metric{display:none;}
             .np-order-hub-revenue-metrics:not(.is-expanded) .np-order-hub-metric-primary{display:flex;}
-            .np-order-hub-metrics-toggle{display:flex;}
-            .np-order-hub-revenue-table{display:block;overflow-x:auto;width:100%;}
+            .np-order-hub-metrics-toggle{display:flex;margin-bottom:20px;}
+            .np-order-hub-revenue-table-wrap{width:100%;max-width:100%;overflow-x:auto;overflow-y:hidden;box-sizing:border-box;}
+            .np-order-hub-revenue-table{min-width:680px;}
+            .np-order-hub-revenue-table th,
+            .np-order-hub-revenue-table td{padding:10px 10px;}
+            .np-order-hub-revenue-table th:nth-child(1),
+            .np-order-hub-revenue-table td:nth-child(1){width:32%;}
+            .np-order-hub-revenue-table th:nth-child(2),
+            .np-order-hub-revenue-table td:nth-child(2){width:24%;text-align:right;padding-right:32px;}
             .np-order-hub-revenue-total{width:100%;}
         }
     </style>';
@@ -426,21 +505,127 @@ function np_order_hub_revenue_dashboard_shortcode($atts) {
                         });
                     });
                 }
+                var periodControls = root.querySelector(".np-order-hub-revenue-controls");
+                var periodToggle = root.querySelector(".np-order-hub-periods-toggle");
+                var dateForm = root.querySelector(".np-order-hub-custom-range");
+                var vatRow = root.querySelector(".np-order-hub-vat-toggle-row");
+                var vatToggle = root.querySelector(".np-order-hub-vat-toggle");
+                var toolbar = root.querySelector(".np-order-hub-revenue-toolbar");
+                var isMobile = window.matchMedia("(max-width:768px)").matches;
+                if (vatToggle) {
+                    if (isMobile && vatRow) {
+                        vatRow.insertBefore(vatToggle, vatRow.firstChild);
+                        vatRow.style.display = "flex";
+                    } else if (!isMobile && toolbar) {
+                        toolbar.appendChild(vatToggle);
+                        if (vatRow) {
+                            vatRow.style.display = "none";
+                        }
+                    }
+                }
+                if (periodControls && periodToggle && dateForm && isMobile) {
+                    periodControls.insertBefore(dateForm, periodToggle);
+                } else if (dateForm && !isMobile) {
+                    var yearlyLink = periodControls ? periodControls.querySelector(".np-order-hub-period-extra[data-period=\"yearly\"]") : null;
+                    if (yearlyLink && yearlyLink.parentNode) {
+                        yearlyLink.parentNode.insertBefore(dateForm, yearlyLink.nextSibling);
+                    } else if (periodControls) {
+                        periodControls.appendChild(dateForm);
+                    } else if (vatRow) {
+                        vatRow.appendChild(dateForm);
+                    }
+                }
+                if (periodControls && periodToggle) {
+                    var periodLabel = periodToggle.querySelector("span");
+                    var hasActiveExtra = !!periodControls.querySelector(".np-order-hub-periods-extra .np-order-hub-period.is-active");
+                    var setPeriodState = function(expanded){
+                        periodControls.classList.toggle("is-expanded", expanded);
+                        periodToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+                        if (periodLabel) {
+                            periodLabel.textContent = expanded ? "Se mindre" : "Se mer";
+                        }
+                    };
+                    setPeriodState(hasActiveExtra);
+                    periodToggle.addEventListener("click", function(){
+                        setPeriodState(!periodControls.classList.contains("is-expanded"));
+                    });
+                }
+
+                var dateToggle = root.querySelector(".np-order-hub-date-dialog-toggle");
+                var dateDialog = root.querySelector(".np-order-hub-date-dialog");
+                if (dateForm && dateToggle && dateDialog) {
+                    var fromHidden = dateForm.querySelector("input[name=\'np_from\']");
+                    var toHidden = dateForm.querySelector("input[name=\'np_to\']");
+                    var fromPicker = dateDialog.querySelector(".np-order-hub-date-dialog-from");
+                    var toPicker = dateDialog.querySelector(".np-order-hub-date-dialog-to");
+                    var cancelButton = dateDialog.querySelector(".np-order-hub-date-dialog-cancel");
+                    var applyButton = dateDialog.querySelector(".np-order-hub-date-dialog-apply");
+                    var backdrop = dateDialog.querySelector(".np-order-hub-date-dialog-backdrop");
+
+                    var closeDateDialog = function(){
+                        dateDialog.setAttribute("hidden", "hidden");
+                        document.body.classList.remove("np-order-hub-date-dialog-open");
+                    };
+                    var openDateDialog = function(){
+                        if (fromPicker && fromHidden) {
+                            fromPicker.value = fromHidden.value || "";
+                        }
+                        if (toPicker && toHidden) {
+                            toPicker.value = toHidden.value || "";
+                        }
+                        dateDialog.removeAttribute("hidden");
+                        document.body.classList.add("np-order-hub-date-dialog-open");
+                    };
+
+                    dateToggle.addEventListener("click", function(event){
+                        event.preventDefault();
+                        openDateDialog();
+                    });
+                    if (cancelButton) {
+                        cancelButton.addEventListener("click", function(event){
+                            event.preventDefault();
+                            closeDateDialog();
+                        });
+                    }
+                    if (backdrop) {
+                        backdrop.addEventListener("click", closeDateDialog);
+                    }
+                    if (applyButton) {
+                        applyButton.addEventListener("click", function(event){
+                            event.preventDefault();
+                            if (fromHidden && fromPicker) {
+                                fromHidden.value = fromPicker.value || "";
+                            }
+                            if (toHidden && toPicker) {
+                                toHidden.value = toPicker.value || "";
+                            }
+                            closeDateDialog();
+                            dateForm.submit();
+                        });
+                    }
+                    dateDialog.addEventListener("keydown", function(event){
+                        if (event.key === "Escape") {
+                            closeDateDialog();
+                        }
+                    });
+                }
+
                 var metrics = root.querySelector(".np-order-hub-revenue-metrics");
                 var toggle = root.querySelector(".np-order-hub-metrics-toggle");
-                if (!metrics || !toggle) { return; }
-                var label = toggle.querySelector("span");
-                var setState = function(expanded){
-                    metrics.classList.toggle("is-expanded", expanded);
-                    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
-                    if (label) {
-                        label.textContent = expanded ? "Se mindre" : "Se mer";
-                    }
-                };
-                setState(false);
-                toggle.addEventListener("click", function(){
-                    setState(!metrics.classList.contains("is-expanded"));
-                });
+                if (metrics && toggle) {
+                    var label = toggle.querySelector("span");
+                    var setState = function(expanded){
+                        metrics.classList.toggle("is-expanded", expanded);
+                        toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+                        if (label) {
+                            label.textContent = expanded ? "Se mindre" : "Se mer";
+                        }
+                    };
+                    setState(false);
+                    toggle.addEventListener("click", function(){
+                        setState(!metrics.classList.contains("is-expanded"));
+                    });
+                }
             });
         })();
     </script>';

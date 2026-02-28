@@ -1178,6 +1178,10 @@ function np_order_hub_debug_page() {
         return $a_time > $b_time ? -1 : 1;
     });
     $heartbeat = np_order_hub_print_agent_get_heartbeat();
+    $monitor = get_option(NP_ORDER_HUB_PRINT_AGENT_MONITOR_OPTION, array());
+    if (!is_array($monitor)) {
+        $monitor = array();
+    }
     $heartbeat_last_seen_gmt = isset($heartbeat['last_seen_gmt']) ? (string) $heartbeat['last_seen_gmt'] : '';
     $heartbeat_last_seen_ts = $heartbeat_last_seen_gmt !== '' ? strtotime($heartbeat_last_seen_gmt . ' GMT') : 0;
     $heartbeat_is_stale = false;
@@ -1225,6 +1229,16 @@ function np_order_hub_debug_page() {
     }
     if ($heartbeat_status !== '') {
         echo ' status=' . esc_html($heartbeat_status);
+    }
+    $monitor_open = !empty($monitor['alert_open']);
+    $monitor_last_alert = !empty($monitor['last_alert_gmt']) ? get_date_from_gmt((string) $monitor['last_alert_gmt'], 'd.m.y H:i:s') : '';
+    $monitor_last_ok = !empty($monitor['last_recovered_gmt']) ? get_date_from_gmt((string) $monitor['last_recovered_gmt'], 'd.m.y H:i:s') : '';
+    echo '<br /><strong>Agent monitor:</strong> ' . esc_html($monitor_open ? 'ALERT OPEN' : 'OK');
+    if ($monitor_last_alert !== '') {
+        echo ' | last alert ' . esc_html($monitor_last_alert);
+    }
+    if ($monitor_last_ok !== '') {
+        echo ' | last recovery ' . esc_html($monitor_last_ok);
     }
     echo '</p>';
     if ($has_active_print_jobs && ($heartbeat_last_seen_ts < 1 || $heartbeat_is_stale)) {
