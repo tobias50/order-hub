@@ -106,7 +106,7 @@ finish_job() {
 }
 
 claim_payload="$(build_json "agent=${AGENT_NAME}")"
-claim_tmp="$(mktemp "${TMP_DIR}/claim.XXXXXX.json")"
+claim_tmp="$(/usr/bin/mktemp "${TMP_DIR}/claim.XXXXXX")"
 
 curl -sS --connect-timeout 10 --max-time "${CURL_TIMEOUT_SECONDS}" -X POST "${CLAIM_URL}" -H "X-NP-Print-Token: ${PRINT_TOKEN}" -H "Content-Type: application/json" --data "${claim_payload}" -o "${claim_tmp}"
 
