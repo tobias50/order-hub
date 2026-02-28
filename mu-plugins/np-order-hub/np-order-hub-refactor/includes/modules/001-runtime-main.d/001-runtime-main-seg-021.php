@@ -132,7 +132,7 @@ function np_order_hub_maybe_notify_new_order($store, $order_number, $order_id, $
     }
     $store_name = is_array($store) && !empty($store['name']) ? (string) $store['name'] : 'Store';
     $total_display = np_order_hub_format_money((float) $total, (string) $currency);
-    $message = trim($store_name . ' ' . $total_display);
+    $message = $store_name . "\n" . $total_display;
     $title = 'Ny ordre';
     np_order_hub_send_pushover_message($title, $message);
 }
