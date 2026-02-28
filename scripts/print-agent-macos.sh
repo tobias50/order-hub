@@ -14,6 +14,8 @@ set -euo pipefail
 #   HUB_API_BASE   defaults to ${HUB_BASE_URL}/index.php/wp-json
 #   LP_TIMEOUT_SECONDS defaults to 45
 #   CURL_TIMEOUT_SECONDS defaults to 45
+#   SELF_UPDATE_ENABLED defaults to true
+#   SELF_UPDATE_URL defaults to ${HUB_BASE_URL}/wp-content/uploads/np-order-hub-print-agent/print-agent-macos.sh
 #   LP_MEDIA defaults to "Print label"
 #   LP_EXTRA_OPTIONS comma-separated (defaults set for top-aligned label print)
 #   LP_IMAGE_OPTIONS comma-separated (defaults set for raster/image print)
@@ -40,6 +42,8 @@ AGENT_NAME="${AGENT_NAME:-lager-mac-1}"
 HUB_API_BASE="${HUB_API_BASE:-${HUB_BASE_URL%/}/index.php/wp-json}"
 LP_TIMEOUT_SECONDS="${LP_TIMEOUT_SECONDS:-45}"
 CURL_TIMEOUT_SECONDS="${CURL_TIMEOUT_SECONDS:-45}"
+SELF_UPDATE_ENABLED="${SELF_UPDATE_ENABLED:-true}"
+SELF_UPDATE_URL="${SELF_UPDATE_URL:-${HUB_BASE_URL%/}/wp-content/uploads/np-order-hub-print-agent/print-agent-macos.sh}"
 LP_MEDIA="${LP_MEDIA:-Print label}"
 # Force 1:1 print by default (no fit-to-page shrink). Keep top-left with zero margins.
 LP_EXTRA_OPTIONS="${LP_EXTRA_OPTIONS:-print-scaling=none,position=top-left,scaling=100,number-up=1,sides=one-sided,page-top=0,page-bottom=0,page-left=0,page-right=0}"
@@ -67,6 +71,52 @@ CLAIM_URL="${HUB_API_BASE%/}/np-order-hub/v1/print-agent/claim"
 FINISH_URL="${HUB_API_BASE%/}/np-order-hub/v1/print-agent/finish"
 TMP_DIR="${TMPDIR:-/tmp}/np-order-hub-print-agent"
 mkdir -p "${TMP_DIR}"
+
+self_update_if_needed() {
+  local enabled_lc
+  enabled_lc="$(printf '%s' "${SELF_UPDATE_ENABLED}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${enabled_lc}" != "1" && "${enabled_lc}" != "true" && "${enabled_lc}" != "yes" ]]; then
+    return 0
+  fi
+  if [[ "${NP_AGENT_SELF_UPDATED:-0}" == "1" ]]; then
+    return 0
+  fi
+  if [[ -z "${SELF_UPDATE_URL}" ]]; then
+    return 0
+  fi
+
+  local script_path tmp_update current_hash new_hash
+  script_path="${BASH_SOURCE[0]}"
+  if [[ -z "${script_path}" || ! -f "${script_path}" ]]; then
+    return 0
+  fi
+
+  tmp_update="$(/usr/bin/mktemp "${TMP_DIR}/self-update.XXXXXX")" || return 0
+  if ! curl -fLsS --connect-timeout 10 --max-time 20 "${SELF_UPDATE_URL}" -o "${tmp_update}"; then
+    rm -f "${tmp_update}" || true
+    return 0
+  fi
+  if ! bash -n "${tmp_update}" >/dev/null 2>&1; then
+    rm -f "${tmp_update}" || true
+    return 0
+  fi
+
+  current_hash="$(shasum -a 256 "${script_path}" | awk '{print $1}')"
+  new_hash="$(shasum -a 256 "${tmp_update}" | awk '{print $1}')"
+  if [[ -z "${current_hash}" || -z "${new_hash}" || "${current_hash}" == "${new_hash}" ]]; then
+    rm -f "${tmp_update}" || true
+    return 0
+  fi
+
+  cp "${tmp_update}" "${script_path}"
+  chmod +x "${script_path}"
+  rm -f "${tmp_update}" || true
+  echo "Self-updated print agent script (${current_hash} -> ${new_hash}). Restarting script."
+  export NP_AGENT_SELF_UPDATED=1
+  exec /bin/bash "${script_path}"
+}
+
+self_update_if_needed
 
 build_json() {
   /usr/bin/python3 - "$@" <<'PY'
