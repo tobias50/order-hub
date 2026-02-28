@@ -111,11 +111,11 @@ if ! claim_response="$(curl -sS --connect-timeout 10 --max-time "${CURL_TIMEOUT_
   exit 1
 fi
 
-claim_data="$(printf '%s' "${claim_response}" | /usr/bin/python3 <<'PY'
+claim_data="$(/usr/bin/python3 - "${claim_response}" <<'PY'
 import json
 import sys
 
-raw = sys.stdin.read()
+raw = sys.argv[1] if len(sys.argv) > 1 else ""
 try:
     data = json.loads(raw)
 except Exception:
