@@ -53,7 +53,11 @@ define('NP_ORDER_HUB_PRINT_AGENT_HEARTBEAT_OPTION', 'np_order_hub_print_agent_he
 define('NP_ORDER_HUB_PRINT_AGENT_MONITOR_OPTION', 'np_order_hub_print_agent_monitor');
 define('NP_ORDER_HUB_PRINT_AGENT_STALE_SECONDS', 300);
 define('NP_ORDER_HUB_PRINT_AGENT_ALERT_COOLDOWN_SECONDS', 900);
+define('NP_ORDER_HUB_PRINT_AGENT_BREAKER_FAILURE_THRESHOLD', 3);
+define('NP_ORDER_HUB_PRINT_AGENT_BREAKER_WINDOW_SECONDS', 900);
+define('NP_ORDER_HUB_PRINT_AGENT_BREAKER_COOLDOWN_SECONDS', 600);
 define('NP_ORDER_HUB_PRODUCTION_ERROR_SOURCE_QR', 'qr');
+define('NP_ORDER_HUB_REVENUE_ONLY_STORE_DEFAULT_KEY', 'lappeland');
 
 function np_order_hub_tempnam($prefix = 'np-order-hub') {
     $prefix = (string) $prefix;
@@ -236,6 +240,47 @@ function np_order_hub_get_production_error_type_label($value) {
 function np_order_hub_get_stores() {
     $stores = get_option(NP_ORDER_HUB_OPTION_STORES, array());
     return is_array($stores) ? $stores : array();
+}
+
+function np_order_hub_get_revenue_only_store_keys() {
+    static $cache = null;
+    if (is_array($cache)) {
+        return $cache;
+    }
+
+    $keys = array(NP_ORDER_HUB_REVENUE_ONLY_STORE_DEFAULT_KEY);
+    $stores = np_order_hub_get_stores();
+    foreach ((array) $stores as $raw_key => $store) {
+        $store_key = sanitize_key((string) $raw_key);
+        if (is_array($store) && !empty($store['key'])) {
+            $store_key = sanitize_key((string) $store['key']);
+        }
+        $store_name = is_array($store) ? strtolower(trim((string) ($store['name'] ?? ''))) : '';
+        $store_url = is_array($store) ? strtolower(trim((string) ($store['url'] ?? ''))) : '';
+
+        if (
+            $store_key === NP_ORDER_HUB_REVENUE_ONLY_STORE_DEFAULT_KEY ||
+            strpos($store_key, 'lappeland') !== false ||
+            strpos($store_name, 'lappeland') !== false ||
+            strpos($store_url, 'lappeland') !== false
+        ) {
+            if ($store_key !== '') {
+                $keys[] = $store_key;
+            }
+        }
+    }
+
+    $keys = array_values(array_unique(array_filter(array_map('sanitize_key', $keys))));
+    $cache = $keys;
+    return $cache;
+}
+
+function np_order_hub_is_revenue_only_store_key($store_key) {
+    $store_key = sanitize_key((string) $store_key);
+    if ($store_key === '') {
+        return false;
+    }
+    return in_array($store_key, np_order_hub_get_revenue_only_store_keys(), true);
 }
 
 function np_order_hub_get_store_by_key($store_key) {

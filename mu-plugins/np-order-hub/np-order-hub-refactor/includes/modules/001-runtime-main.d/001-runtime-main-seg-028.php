@@ -8,6 +8,9 @@ if (!defined('NP_ORDER_HUB_DELETED_SYNC_INTERVAL')) {
 if (!defined('NP_ORDER_HUB_DELETED_SYNC_LIMIT')) {
     define('NP_ORDER_HUB_DELETED_SYNC_LIMIT', 1000);
 }
+if (!defined('NP_ORDER_HUB_DELETED_SYNC_CURSOR_OPTION')) {
+    define('NP_ORDER_HUB_DELETED_SYNC_CURSOR_OPTION', 'np_order_hub_deleted_sync_cursor');
+}
 if (!defined('NP_ORDER_HUB_STATUS_SYNC_EVENT')) {
     define('NP_ORDER_HUB_STATUS_SYNC_EVENT', 'np_order_hub_sync_order_statuses_cron');
 }
@@ -88,6 +91,11 @@ function np_order_hub_wc_response_indicates_missing_order($status_code, $body) {
     }
 
     return false;
+}
+
+function np_order_hub_remote_status_indicates_deleted($status) {
+    $status = np_order_hub_status_sync_normalize_status($status);
+    return in_array($status, array('trash', 'trashed', 'deleted', 'auto-draft'), true);
 }
 
 function np_order_hub_token_response_indicates_missing_order($status_code, $body) {
@@ -198,6 +206,8 @@ function np_order_hub_sync_deleted_orders($limit = 250, $store_filter = '') {
 
     $table = np_order_hub_table_name();
     $stores = np_order_hub_get_stores();
+    $cursor = np_order_hub_deleted_sync_get_cursor();
+    $wrapped = false;
 
     if ($store_filter !== '') {
         $records = $wpdb->get_results(
@@ -211,11 +221,24 @@ function np_order_hub_sync_deleted_orders($limit = 250, $store_filter = '') {
     } else {
         $records = $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT id, store_key, order_id FROM $table ORDER BY updated_at_gmt DESC, id DESC LIMIT %d",
+                "SELECT id, store_key, order_id FROM $table WHERE id > %d ORDER BY id ASC LIMIT %d",
+                $cursor,
                 $limit
             ),
             ARRAY_A
         );
+        if (empty($records) && $cursor > 0) {
+            $wrapped = true;
+            $cursor = 0;
+            $records = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT id, store_key, order_id FROM $table WHERE id > %d ORDER BY id ASC LIMIT %d",
+                    $cursor,
+                    $limit
+                ),
+                ARRAY_A
+            );
+        }
     }
 
     $stats = array(
@@ -230,9 +253,16 @@ function np_order_hub_sync_deleted_orders($limit = 250, $store_filter = '') {
         'other_errors' => 0,
         'limit' => $limit,
         'store_filter' => $store_filter,
+        'start_cursor' => $store_filter === '' ? np_order_hub_deleted_sync_get_cursor() : 0,
+        'end_cursor' => $store_filter === '' ? $cursor : 0,
+        'wrapped' => $store_filter === '' && $wrapped ? 1 : 0,
     );
 
     if (empty($records)) {
+        if ($store_filter === '') {
+            np_order_hub_deleted_sync_set_cursor(0);
+            $stats['end_cursor'] = 0;
+        }
         return $stats;
     }
 
@@ -249,6 +279,9 @@ function np_order_hub_sync_deleted_orders($limit = 250, $store_filter = '') {
         }
 
         $stats['checked']++;
+        if ($store_filter === '') {
+            $stats['end_cursor'] = $record_id;
+        }
 
         if (empty($stores[$store_key]) || !is_array($stores[$store_key])) {
             $stats['missing_store']++;
@@ -276,6 +309,26 @@ function np_order_hub_sync_deleted_orders($limit = 250, $store_filter = '') {
                 $body = wp_remote_retrieve_body($response);
 
                 if (np_order_hub_wc_response_indicates_missing_order($status_code, $body)) {
+                    $deleted = $wpdb->delete(
+                        $table,
+                        array('id' => $record_id),
+                        array('%d')
+                    );
+                    if ($deleted !== false) {
+                        $stats['removed']++;
+                        $job_key = np_order_hub_print_queue_job_key($store_key, $order_id);
+                        if ($job_key !== '') {
+                            np_order_hub_print_queue_remove_job($job_key);
+                        }
+                    } else {
+                        $stats['other_errors']++;
+                    }
+                    continue;
+                }
+
+                $decoded = $body !== '' ? json_decode($body, true) : null;
+                $remote_status = is_array($decoded) ? np_order_hub_status_sync_normalize_status($decoded['status'] ?? '') : '';
+                if (np_order_hub_remote_status_indicates_deleted($remote_status)) {
                     $deleted = $wpdb->delete(
                         $table,
                         array('id' => $record_id),
@@ -337,6 +390,10 @@ function np_order_hub_sync_deleted_orders($limit = 250, $store_filter = '') {
                 $stats['other_errors']++;
             }
         }
+    }
+
+    if ($store_filter === '') {
+        np_order_hub_deleted_sync_set_cursor((int) ($stats['end_cursor'] ?? 0));
     }
 
     return $stats;
@@ -476,10 +533,19 @@ function np_order_hub_fetch_store_order_state_via_wc($store, $order_id, $timeout
         return new WP_Error('api_bad_payload', 'Invalid WooCommerce API payload.');
     }
 
+    $status = np_order_hub_status_sync_normalize_status($decoded['status'] ?? '');
+    if (np_order_hub_remote_status_indicates_deleted($status)) {
+        return array(
+            'exists' => false,
+            'source' => 'wc',
+            'status' => $status,
+        );
+    }
+
     return array(
         'exists' => true,
         'source' => 'wc',
-        'status' => np_order_hub_status_sync_normalize_status($decoded['status'] ?? ''),
+        'status' => $status,
         'order_number' => isset($decoded['number']) ? sanitize_text_field((string) $decoded['number']) : (string) $order_id,
         'currency' => isset($decoded['currency']) ? sanitize_text_field((string) $decoded['currency']) : '',
         'total' => np_order_hub_parse_numeric_value($decoded['total'] ?? 0),
@@ -813,6 +879,14 @@ function np_order_hub_backfill_processing_orders($store_filter = '', $max_per_st
     }
 
     return $stats;
+}
+
+function np_order_hub_deleted_sync_get_cursor() {
+    return absint(get_option(NP_ORDER_HUB_DELETED_SYNC_CURSOR_OPTION, 0));
+}
+
+function np_order_hub_deleted_sync_set_cursor($cursor) {
+    update_option(NP_ORDER_HUB_DELETED_SYNC_CURSOR_OPTION, absint($cursor), false);
 }
 
 function np_order_hub_status_sync_get_cursor() {
@@ -1151,6 +1225,26 @@ function np_order_hub_debug_page() {
                     'message' => 'Print job queued for retry.',
                 );
             }
+        } elseif ($action === 'confirm_print') {
+            $job_key = sanitize_text_field((string) ($_POST['np_order_hub_print_job_key'] ?? ''));
+            $confirmed = np_order_hub_print_queue_mark_manually_confirmed($job_key);
+            if (is_wp_error($confirmed)) {
+                $queue_notice = array(
+                    'type' => 'error',
+                    'message' => $confirmed->get_error_message(),
+                );
+            } else {
+                $queue_notice = array(
+                    'type' => 'updated',
+                    'message' => 'Print job manually confirmed.',
+                );
+            }
+        } elseif ($action === 'clear_breaker') {
+            np_order_hub_print_agent_clear_circuit_breaker(true);
+            $queue_notice = array(
+                'type' => 'updated',
+                'message' => 'Print circuit breaker cleared.',
+            );
         }
     }
     if (!empty($_POST['np_order_hub_print_agent_token_action'])) {
@@ -1178,10 +1272,8 @@ function np_order_hub_debug_page() {
         return $a_time > $b_time ? -1 : 1;
     });
     $heartbeat = np_order_hub_print_agent_get_heartbeat();
-    $monitor = get_option(NP_ORDER_HUB_PRINT_AGENT_MONITOR_OPTION, array());
-    if (!is_array($monitor)) {
-        $monitor = array();
-    }
+    $monitor = np_order_hub_print_agent_get_monitor_state();
+    $breaker = np_order_hub_print_agent_get_circuit_breaker_state(false);
     $heartbeat_last_seen_gmt = isset($heartbeat['last_seen_gmt']) ? (string) $heartbeat['last_seen_gmt'] : '';
     $heartbeat_last_seen_ts = $heartbeat_last_seen_gmt !== '' ? strtotime($heartbeat_last_seen_gmt . ' GMT') : 0;
     $heartbeat_is_stale = false;
@@ -1198,6 +1290,16 @@ function np_order_hub_debug_page() {
             $has_active_print_jobs = true;
             break;
         }
+    }
+    $review_jobs = array();
+    foreach ($jobs as $review_job_key => $review_job) {
+        if (!is_array($review_job)) {
+            continue;
+        }
+        if (!np_order_hub_print_queue_job_needs_review($review_job)) {
+            continue;
+        }
+        $review_jobs[$review_job_key] = $review_job;
     }
 
     echo '<div class="wrap">';
@@ -1240,10 +1342,25 @@ function np_order_hub_debug_page() {
     if ($monitor_last_ok !== '') {
         echo ' | last recovery ' . esc_html($monitor_last_ok);
     }
+    echo '<br /><strong>Circuit breaker:</strong> ' . esc_html(!empty($breaker['open']) ? 'PAUSED' : 'READY');
+    if (!empty($breaker['open_until_gmt'])) {
+        echo ' | until ' . esc_html(get_date_from_gmt((string) $breaker['open_until_gmt'], 'd.m.y H:i:s'));
+    }
+    if (!empty($breaker['last_reason'])) {
+        echo ' | last reason ' . esc_html((string) $breaker['last_reason']);
+    }
+    if (!empty($breaker['hard_failures']) && is_array($breaker['hard_failures'])) {
+        echo ' | hard failures ' . esc_html((string) count($breaker['hard_failures']));
+    }
     echo '</p>';
     if ($has_active_print_jobs && ($heartbeat_last_seen_ts < 1 || $heartbeat_is_stale)) {
         echo '<div class="notice notice-warning inline"><p>';
         echo 'Print agent virker inaktiv, men køen har aktive jobber. Sjekk LaunchAgent/logg på lager-Mac.';
+        echo '</p></div>';
+    }
+    if (!empty($review_jobs)) {
+        echo '<div class="notice notice-warning inline"><p>';
+        echo 'Printkontroll: ' . esc_html((string) count($review_jobs)) . ' fullførte jobb(er) mangler sterk verifisering og bør sjekkes manuelt.';
         echo '</p></div>';
     }
     echo '<form method="post" style="margin:0 0 10px;">';
@@ -1253,6 +1370,10 @@ function np_order_hub_debug_page() {
     echo '<form method="post" style="margin:10px 0 14px;">';
     wp_nonce_field('np_order_hub_debug_print_queue');
     echo '<button class="button button-primary" type="submit" name="np_order_hub_print_queue_action" value="run_due">Run due jobs now</button>';
+    echo '</form>';
+    echo '<form method="post" style="margin:0 0 14px;">';
+    wp_nonce_field('np_order_hub_debug_print_queue');
+    echo '<button class="button" type="submit" name="np_order_hub_print_queue_action" value="clear_breaker">Clear print circuit breaker</button>';
     echo '</form>';
     echo '<form method="post" style="margin:0 0 18px;">';
     wp_nonce_field('np_order_hub_debug_print_queue');
@@ -1291,9 +1412,11 @@ function np_order_hub_debug_page() {
         echo '<th>Order</th>';
         echo '<th>Store</th>';
         echo '<th>Status</th>';
+        echo '<th>Print check</th>';
         echo '<th>Attempts</th>';
         echo '<th>Scheduled</th>';
         echo '<th>Updated</th>';
+        echo '<th>CUPS jobs</th>';
         echo '<th>Document</th>';
         echo '<th>Last error</th>';
         echo '<th>Actions</th>';
@@ -1328,14 +1451,35 @@ function np_order_hub_debug_page() {
             $document_name = isset($job['document_filename']) ? (string) $job['document_filename'] : 'PDF';
             $last_error = isset($job['last_error']) ? (string) $job['last_error'] : '';
             $logs = isset($job['log']) && is_array($job['log']) ? $job['log'] : array();
+            $cups_summary = np_order_hub_print_queue_get_cups_job_summary($job);
+            $last_print_meta = isset($job['last_print_meta']) && is_array($job['last_print_meta']) ? $job['last_print_meta'] : array();
+            $print_mode = isset($last_print_meta['mode']) ? sanitize_key((string) $last_print_meta['mode']) : '';
+            $verification = np_order_hub_print_queue_get_verification_summary($job);
+            $needs_review = !empty($verification['needs_review']);
 
             echo '<tr>';
             echo '<td>' . $order_label . '</td>';
             echo '<td>' . esc_html($store_name) . '</td>';
             echo '<td>' . esc_html($status) . '</td>';
+            echo '<td>';
+            echo esc_html((string) ($verification['label'] ?? '—'));
+            if (!empty($verification['detail'])) {
+                echo '<br /><span style="color:#646970;">' . esc_html((string) $verification['detail']) . '</span>';
+            }
+            echo '</td>';
             echo '<td>' . esc_html($attempts . '/' . $max_attempts) . '</td>';
             echo '<td>' . esc_html($scheduled !== '' ? get_date_from_gmt($scheduled, 'd.m.y H:i:s') : '—') . '</td>';
             echo '<td>' . esc_html($updated !== '' ? get_date_from_gmt($updated, 'd.m.y H:i:s') : '—') . '</td>';
+            echo '<td>';
+            if ($cups_summary !== '') {
+                echo esc_html($cups_summary);
+                if ($print_mode !== '') {
+                    echo '<br /><span style="color:#646970;">mode=' . esc_html($print_mode) . '</span>';
+                }
+            } else {
+                echo '—';
+            }
+            echo '</td>';
             if ($document_url !== '') {
                 echo '<td><a href="' . esc_url($document_url) . '" target="_blank" rel="noopener">' . esc_html($document_name) . '</a></td>';
             } else {
@@ -1343,6 +1487,14 @@ function np_order_hub_debug_page() {
             }
             echo '<td>' . esc_html($last_error !== '' ? $last_error : '—') . '</td>';
             echo '<td>';
+            if ($needs_review) {
+                echo '<form method="post" style="display:inline; margin-right:6px;">';
+                wp_nonce_field('np_order_hub_debug_print_queue');
+                echo '<input type="hidden" name="np_order_hub_print_queue_action" value="confirm_print" />';
+                echo '<input type="hidden" name="np_order_hub_print_job_key" value="' . esc_attr((string) $job_key) . '" />';
+                echo '<button class="button button-small" type="submit">Bekreft print</button>';
+                echo '</form>';
+            }
             echo '<form method="post" style="display:inline;">';
             wp_nonce_field('np_order_hub_debug_print_queue');
             echo '<input type="hidden" name="np_order_hub_print_queue_action" value="retry_job" />';

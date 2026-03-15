@@ -40,7 +40,7 @@ if (is_admin()) {
         $number = isset($item['order_number']) ? $item['order_number'] : '';
         $order_id = isset($item['order_id']) ? (int) $item['order_id'] : 0;
         $label = $number !== '' ? ('#' . $number) : ('#' . $order_id);
-        $url = isset($item['order_admin_url']) ? $item['order_admin_url'] : '';
+        $url = np_order_hub_get_order_admin_url_for_record($item);
         if ($url !== '') {
             return '<a href="' . esc_url($url) . '" target="_blank" rel="noopener">' . esc_html($label) . '</a>';
         }
@@ -97,7 +97,7 @@ if (is_admin()) {
             $actions[] = '<a class="button button-small" href="' . esc_url($packing_url) . '" target="_blank" rel="noopener">Packing slip</a>';
         }
 
-        $url = isset($item['order_admin_url']) ? $item['order_admin_url'] : '';
+        $url = np_order_hub_get_order_admin_url_for_record($item);
         if ($url !== '') {
             $actions[] = '<a class="button button-small" href="' . esc_url($url) . '" target="_blank" rel="noopener">Open order</a>';
         }
@@ -122,20 +122,71 @@ if (is_admin()) {
         }
         $order = $order === 'ASC' ? 'ASC' : 'DESC';
 
+        $search_raw = isset($_REQUEST['s']) ? sanitize_text_field(wp_unslash((string) $_REQUEST['s'])) : '';
+        $where = '';
+        $where_args = array();
+        if ($search_raw !== '') {
+            $search = trim($search_raw);
+            if ($search !== '') {
+                $search_clauses = array();
+                $search_args = array();
+
+                $numeric_candidate = ltrim($search, '#');
+                if (ctype_digit($numeric_candidate)) {
+                    $search_clauses[] = '(order_id = %d OR order_number LIKE %s)';
+                    $search_args[] = (int) $numeric_candidate;
+                    $search_args[] = '%' . $wpdb->esc_like($numeric_candidate) . '%';
+                }
+
+                $terms = preg_split('/\s+/', $search);
+                $terms = array_values(array_filter(array_unique(array_map('trim', (array) $terms))));
+                if (empty($terms)) {
+                    $terms = array($search);
+                }
+                $term_clauses = array();
+                foreach ($terms as $term) {
+                    $like = '%' . $wpdb->esc_like($term) . '%';
+                    $term_clauses[] = '(order_number LIKE %s OR payload LIKE %s)';
+                    $search_args[] = $like;
+                    $search_args[] = $like;
+                }
+                if (!empty($term_clauses)) {
+                    $search_clauses[] = '(' . implode(' AND ', $term_clauses) . ')';
+                }
+
+                if (!empty($search_clauses)) {
+                    $where = 'WHERE (' . implode(' OR ', $search_clauses) . ')';
+                    $where_args = $search_args;
+                }
+            }
+        }
+
+        $revenue_only_store_keys = np_order_hub_get_revenue_only_store_keys();
+        if (!empty($revenue_only_store_keys)) {
+            $store_placeholders = implode(',', array_fill(0, count($revenue_only_store_keys), '%s'));
+            $store_clause = "store_key NOT IN ($store_placeholders)";
+            if ($where === '') {
+                $where = 'WHERE ' . $store_clause;
+            } else {
+                $where .= ' AND ' . $store_clause;
+            }
+            $where_args = array_merge($where_args, $revenue_only_store_keys);
+        }
+
         $per_page = NP_ORDER_HUB_PER_PAGE;
         $current_page = $this->get_pagenum();
         $offset = ($current_page - 1) * $per_page;
 
-        $total_items = (int) $wpdb->get_var("SELECT COUNT(*) FROM $table");
+        $count_sql = "SELECT COUNT(*) FROM $table $where";
+        if (!empty($where_args)) {
+            $total_items = (int) $wpdb->get_var($wpdb->prepare($count_sql, $where_args));
+        } else {
+            $total_items = (int) $wpdb->get_var($count_sql);
+        }
 
-        $items = $wpdb->get_results(
-            $wpdb->prepare(
-                "SELECT * FROM $table ORDER BY $orderby $order LIMIT %d OFFSET %d",
-                $per_page,
-                $offset
-            ),
-            ARRAY_A
-        );
+        $items_sql = "SELECT * FROM $table $where ORDER BY $orderby $order LIMIT %d OFFSET %d";
+        $items_args = array_merge($where_args, array($per_page, $offset));
+        $items = $wpdb->get_results($wpdb->prepare($items_sql, $items_args), ARRAY_A);
 
         $this->items = $items;
 

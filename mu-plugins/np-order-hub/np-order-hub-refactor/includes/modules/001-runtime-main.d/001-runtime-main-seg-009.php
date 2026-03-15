@@ -204,6 +204,12 @@ function np_order_hub_print_queue_retry_now($job_key) {
     $job['claim_id'] = '';
     $job['claim_by'] = '';
     $job['claim_expires_gmt'] = '';
+    $job['print_verification_status'] = '';
+    $job['print_verified_at_gmt'] = '';
+    $job['manual_print_confirmed_at_gmt'] = '';
+    $job['last_cups_job_ids'] = '';
+    $job['last_print_agent'] = '';
+    $job['last_print_meta'] = array();
     $scheduled = np_order_hub_print_queue_schedule_event($job_key, time() + 5);
     $job['scheduled_for_gmt'] = gmdate('Y-m-d H:i:s', (int) $scheduled);
     np_order_hub_print_queue_append_log($job, 'Manually queued for immediate retry.');

@@ -103,8 +103,9 @@ function np_order_hub_help_scout_build_match_note($customer, $matches) {
         $parts[] = $total;
         $lines[] = '- ' . implode(' | ', $parts);
         $lines[] = '  Hub: ' . admin_url('admin.php?page=np-order-hub-details&record_id=' . (int) $match['id']);
-        if (!empty($match['order_admin_url'])) {
-            $lines[] = '  Butikk: ' . (string) $match['order_admin_url'];
+        $store_order_url = np_order_hub_get_order_admin_url_for_record($match);
+        if ($store_order_url !== '') {
+            $lines[] = '  Butikk: ' . $store_order_url;
         }
         $lines[] = '';
     }

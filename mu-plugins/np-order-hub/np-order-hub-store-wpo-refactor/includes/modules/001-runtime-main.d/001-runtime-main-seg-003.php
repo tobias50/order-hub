@@ -273,6 +273,9 @@ function np_order_hub_wpo_push_order_to_hub($order_id, $event = 'created', $orde
         $payload = ($order && is_a($order, 'WC_Order'))
             ? np_order_hub_wpo_build_order_payload_for_hub($order)
             : array('id' => $order_id, 'number' => (string) $order_id);
+        if ($event === 'deleted') {
+            $payload['deleted'] = true;
+        }
 
         np_order_hub_wpo_dispatch_payload_to_hub_targets($targets, $payload, $event);
     } catch (Throwable $error) {

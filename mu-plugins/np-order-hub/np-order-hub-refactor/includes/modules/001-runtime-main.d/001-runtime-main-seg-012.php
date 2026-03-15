@@ -60,13 +60,24 @@ function np_order_hub_get_produksjonsfeil_filters() {
 	    return $filters;
 }
 
-function np_order_hub_build_where_clause($filters, &$args, $include_search = true, $include_dates = true) {
+function np_order_hub_build_where_clause($filters, &$args, $include_search = true, $include_dates = true, $include_revenue_only_stores = false) {
     global $wpdb;
+    $filters = is_array($filters) ? $filters : array();
     $where = array();
 
-    if (!empty($filters['store'])) {
-        $where[] = 'store_key = %s';
-        $args[] = $filters['store'];
+    $store_key = isset($filters['store']) ? sanitize_key((string) $filters['store']) : '';
+    $revenue_only_store_keys = np_order_hub_get_revenue_only_store_keys();
+    if ($store_key !== '') {
+        if (!$include_revenue_only_stores && np_order_hub_is_revenue_only_store_key($store_key)) {
+            $where[] = '1=0';
+        } else {
+            $where[] = 'store_key = %s';
+            $args[] = $store_key;
+        }
+    } elseif (!$include_revenue_only_stores && !empty($revenue_only_store_keys)) {
+        $placeholders = implode(',', array_fill(0, count($revenue_only_store_keys), '%s'));
+        $where[] = "store_key NOT IN ($placeholders)";
+        $args = array_merge($args, $revenue_only_store_keys);
     }
     if (!empty($filters['status'])) {
         $where[] = 'status = %s';
@@ -83,15 +94,41 @@ function np_order_hub_build_where_clause($filters, &$args, $include_search = tru
         }
     }
     if ($include_search && !empty($filters['search'])) {
-        $search = $filters['search'];
-        $like = '%' . $wpdb->esc_like($search) . '%';
-        if (is_numeric($search)) {
-            $where[] = '(order_id = %d OR order_number LIKE %s)';
-            $args[] = (int) $search;
-            $args[] = $like;
-        } else {
-            $where[] = 'order_number LIKE %s';
-            $args[] = $like;
+        $search = trim((string) $filters['search']);
+        if ($search !== '') {
+            $search_clauses = array();
+            $search_args = array();
+
+            // Support #123 and 123 for direct order-id / order-number lookups.
+            $numeric_candidate = ltrim($search, '#');
+            if (ctype_digit($numeric_candidate)) {
+                $search_clauses[] = '(order_id = %d OR order_number LIKE %s)';
+                $search_args[] = (int) $numeric_candidate;
+                $search_args[] = '%' . $wpdb->esc_like($numeric_candidate) . '%';
+            } else {
+                // Name lookup: split on whitespace so "Fornavn Etternavn" matches JSON payload fields.
+                $terms = preg_split('/\s+/', $search);
+                $terms = array_values(array_filter(array_unique(array_map('trim', (array) $terms))));
+                if (empty($terms)) {
+                    $terms = array($search);
+                }
+
+                $term_clauses = array();
+                foreach ($terms as $term) {
+                    $like = '%' . $wpdb->esc_like($term) . '%';
+                    $term_clauses[] = '(order_number LIKE %s OR payload LIKE %s)';
+                    $search_args[] = $like;
+                    $search_args[] = $like;
+                }
+                if (!empty($term_clauses)) {
+                    $search_clauses[] = '(' . implode(' AND ', $term_clauses) . ')';
+                }
+            }
+
+            if (!empty($search_clauses)) {
+                $where[] = '(' . implode(' OR ', $search_clauses) . ')';
+                $args = array_merge($args, $search_args);
+            }
         }
     }
 

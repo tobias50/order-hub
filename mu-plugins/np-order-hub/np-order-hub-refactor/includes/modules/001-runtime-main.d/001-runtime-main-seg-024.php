@@ -423,6 +423,7 @@ function np_order_hub_revenue_dashboard_shortcode($atts) {
         body.np-order-hub-dashboard-page .wp-block-post-content{overflow-x:hidden;}
         body.np-order-hub-date-dialog-open{overflow:hidden;}
         @media (min-width:769px){
+            .np-order-hub-vat-toggle-row{display:none;}
             .np-order-hub-revenue-toolbar{display:flex;align-items:center;gap:12px;overflow-x:visible;}
             .np-order-hub-revenue-controls{flex:1 1 auto;width:auto;min-width:0;}
             .np-order-hub-revenue-toolbar > .np-order-hub-vat-toggle{margin-left:auto;flex:0 0 auto;}

@@ -591,7 +591,7 @@ function np_order_hub_dashboard_page() {
             $total_display = np_order_hub_format_money(isset($order['total']) ? (float) $order['total'] : 0.0, isset($order['currency']) ? (string) $order['currency'] : '');
             $is_reklamasjon = np_order_hub_record_is_reklamasjon($order);
             $details_url = admin_url('admin.php?page=np-order-hub-details&record_id=' . (int) $order['id']);
-            $open_url = isset($order['order_admin_url']) ? (string) $order['order_admin_url'] : '';
+            $open_url = np_order_hub_get_order_admin_url_for_record($order);
             $store = np_order_hub_get_store_by_key(isset($order['store_key']) ? $order['store_key'] : '');
             $packing_url = np_order_hub_build_packing_slip_url(
                 $store,

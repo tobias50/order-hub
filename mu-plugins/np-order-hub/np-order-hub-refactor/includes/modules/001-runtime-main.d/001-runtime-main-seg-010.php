@@ -1,10 +1,258 @@
 <?php
+function np_order_hub_print_agent_get_alert_title_base() {
+    $title_base = 'Order Hub';
+    if (function_exists('np_order_hub_get_pushover_settings')) {
+        $settings = np_order_hub_get_pushover_settings();
+        if (is_array($settings) && !empty($settings['title'])) {
+            $title_base = (string) $settings['title'];
+        }
+    }
+    return $title_base;
+}
+
+function np_order_hub_print_agent_get_monitor_state() {
+    $monitor = get_option(NP_ORDER_HUB_PRINT_AGENT_MONITOR_OPTION, array());
+    return is_array($monitor) ? $monitor : array();
+}
+
+function np_order_hub_print_agent_get_circuit_breaker($monitor = null) {
+    if (!is_array($monitor)) {
+        $monitor = np_order_hub_print_agent_get_monitor_state();
+    }
+    $breaker = isset($monitor['circuit_breaker']) && is_array($monitor['circuit_breaker']) ? $monitor['circuit_breaker'] : array();
+
+    return wp_parse_args($breaker, array(
+        'open' => 0,
+        'opened_at_gmt' => '',
+        'open_until_gmt' => '',
+        'last_reason' => '',
+        'last_job_key' => '',
+        'last_agent' => '',
+        'hard_failures' => array(),
+        'last_trip_gmt' => '',
+        'last_released_gmt' => '',
+    ));
+}
+
+function np_order_hub_print_agent_save_monitor_state($monitor) {
+    if (!is_array($monitor)) {
+        $monitor = array();
+    }
+    update_option(NP_ORDER_HUB_PRINT_AGENT_MONITOR_OPTION, $monitor, false);
+}
+
+function np_order_hub_print_agent_prune_hard_failures($failures, $now_ts = null) {
+    $window = max(60, (int) NP_ORDER_HUB_PRINT_AGENT_BREAKER_WINDOW_SECONDS);
+    $now_ts = $now_ts !== null ? (int) $now_ts : time();
+    $keep = array();
+
+    foreach ((array) $failures as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $ts = isset($row['ts']) ? (int) $row['ts'] : 0;
+        if ($ts < 1 && !empty($row['gmt'])) {
+            $ts = strtotime((string) $row['gmt'] . ' GMT');
+        }
+        if ($ts < 1 || ($now_ts - $ts) > $window) {
+            continue;
+        }
+        $keep[] = array(
+            'ts' => $ts,
+            'gmt' => gmdate('Y-m-d H:i:s', $ts),
+            'job_key' => sanitize_text_field((string) ($row['job_key'] ?? '')),
+            'agent_name' => sanitize_text_field((string) ($row['agent_name'] ?? '')),
+            'error' => sanitize_text_field((string) ($row['error'] ?? '')),
+            'failure_stage' => sanitize_text_field((string) ($row['failure_stage'] ?? '')),
+            'cups_job_ids' => sanitize_text_field((string) ($row['cups_job_ids'] ?? '')),
+        );
+    }
+
+    if (count($keep) > 10) {
+        $keep = array_slice($keep, -10);
+    }
+
+    return $keep;
+}
+
+function np_order_hub_print_agent_message_is_hard_failure($error_message, $print_meta = array()) {
+    $meta = np_order_hub_print_queue_normalize_print_meta($print_meta);
+    if (!empty($meta['hard_failure'])) {
+        return true;
+    }
+
+    $message = strtolower((string) $error_message);
+    if ($message === '') {
+        return false;
+    }
+
+    return (bool) preg_match('/(not responding|unreachable|unable|offline|timed out|connection refused|host is down|no route to host|media-empty|media-jam|door-open|printer_disabled|queue not healthy|printer queue not healthy|spool_error|ipp_error|completed_with_error|paused|disabled|intervention|job-stopped|job-aborted|job-canceled)/i', $message);
+}
+
+function np_order_hub_print_agent_clear_circuit_breaker($clear_failures = true) {
+    $monitor = np_order_hub_print_agent_get_monitor_state();
+    $breaker = np_order_hub_print_agent_get_circuit_breaker($monitor);
+
+    $breaker['open'] = 0;
+    $breaker['open_until_gmt'] = '';
+    $breaker['opened_at_gmt'] = '';
+    $breaker['last_reason'] = '';
+    $breaker['last_job_key'] = '';
+    $breaker['last_agent'] = '';
+    if ($clear_failures) {
+        $breaker['hard_failures'] = array();
+    }
+    $breaker['last_released_gmt'] = gmdate('Y-m-d H:i:s');
+
+    $monitor['circuit_breaker'] = $breaker;
+    np_order_hub_print_agent_save_monitor_state($monitor);
+
+    return $monitor;
+}
+
+function np_order_hub_print_agent_get_circuit_breaker_state($auto_release_expired = true) {
+    $monitor = np_order_hub_print_agent_get_monitor_state();
+    $breaker = np_order_hub_print_agent_get_circuit_breaker($monitor);
+    $breaker['hard_failures'] = np_order_hub_print_agent_prune_hard_failures($breaker['hard_failures']);
+    $changed = false;
+
+    if (!empty($breaker['open']) && $auto_release_expired) {
+        $open_until_ts = !empty($breaker['open_until_gmt']) ? strtotime((string) $breaker['open_until_gmt'] . ' GMT') : 0;
+        if ($open_until_ts > 0 && $open_until_ts <= time()) {
+            $breaker['open'] = 0;
+            $breaker['open_until_gmt'] = '';
+            $breaker['opened_at_gmt'] = '';
+            $breaker['last_reason'] = '';
+            $breaker['last_job_key'] = '';
+            $breaker['last_agent'] = '';
+            $breaker['hard_failures'] = array();
+            $breaker['last_released_gmt'] = gmdate('Y-m-d H:i:s');
+            $changed = true;
+        }
+    }
+
+    if ($changed) {
+        $monitor['circuit_breaker'] = $breaker;
+        np_order_hub_print_agent_save_monitor_state($monitor);
+    }
+
+    return $breaker;
+}
+
+function np_order_hub_print_agent_register_result($success, $job_key, $error_message = '', $print_meta = array(), $agent_name = '') {
+    $monitor = np_order_hub_print_agent_get_monitor_state();
+    $breaker = np_order_hub_print_agent_get_circuit_breaker($monitor);
+    $now_ts = time();
+    $now_gmt = gmdate('Y-m-d H:i:s', $now_ts);
+    $changed = false;
+
+    $print_meta = np_order_hub_print_queue_normalize_print_meta($print_meta);
+    $agent_name = sanitize_text_field((string) $agent_name);
+    if ($agent_name === '' && !empty($print_meta['agent_name'])) {
+        $agent_name = sanitize_text_field((string) $print_meta['agent_name']);
+    }
+
+    $breaker['hard_failures'] = np_order_hub_print_agent_prune_hard_failures($breaker['hard_failures'], $now_ts);
+
+    if ($success) {
+        if (!empty($breaker['hard_failures'])) {
+            $breaker['hard_failures'] = array();
+            $changed = true;
+        }
+    } elseif (np_order_hub_print_agent_message_is_hard_failure($error_message, $print_meta)) {
+        $breaker['hard_failures'][] = array(
+            'ts' => $now_ts,
+            'gmt' => $now_gmt,
+            'job_key' => sanitize_text_field((string) $job_key),
+            'agent_name' => $agent_name,
+            'error' => sanitize_text_field((string) $error_message),
+            'failure_stage' => sanitize_text_field((string) ($print_meta['failure_stage'] ?? '')),
+            'cups_job_ids' => sanitize_text_field((string) ($print_meta['cups_job_ids'] ?? '')),
+        );
+        $breaker['hard_failures'] = np_order_hub_print_agent_prune_hard_failures($breaker['hard_failures'], $now_ts);
+        $changed = true;
+
+        $threshold = max(2, (int) NP_ORDER_HUB_PRINT_AGENT_BREAKER_FAILURE_THRESHOLD);
+        if (count($breaker['hard_failures']) >= $threshold) {
+            $breaker['open'] = 1;
+            $breaker['opened_at_gmt'] = $now_gmt;
+            $breaker['open_until_gmt'] = gmdate('Y-m-d H:i:s', $now_ts + max(120, (int) NP_ORDER_HUB_PRINT_AGENT_BREAKER_COOLDOWN_SECONDS));
+            $breaker['last_reason'] = sanitize_text_field((string) $error_message);
+            $breaker['last_job_key'] = sanitize_text_field((string) $job_key);
+            $breaker['last_agent'] = $agent_name;
+            $breaker['last_trip_gmt'] = $now_gmt;
+            $changed = true;
+
+            $already_open = !empty($monitor['circuit_breaker']['open']);
+            if (!$already_open && function_exists('np_order_hub_send_pushover_message')) {
+                $examples = array();
+                foreach ($breaker['hard_failures'] as $failure) {
+                    $label = sanitize_text_field((string) ($failure['job_key'] ?? ''));
+                    if (!empty($failure['cups_job_ids'])) {
+                        $label .= ' [CUPS ' . sanitize_text_field((string) $failure['cups_job_ids']) . ']';
+                    }
+                    if (!empty($failure['failure_stage'])) {
+                        $label .= ' ' . sanitize_text_field((string) $failure['failure_stage']);
+                    }
+                    if ($label !== '') {
+                        $examples[] = $label;
+                    }
+                }
+
+                $message = 'Autoprint pause activated after ' . count($breaker['hard_failures']) . ' hard printer failures. Paused until ' . get_date_from_gmt($breaker['open_until_gmt'], 'd.m.y H:i:s') . '.';
+                if ($job_key !== '') {
+                    $message .= ' Last job: ' . sanitize_text_field((string) $job_key) . '.';
+                }
+                if ($error_message !== '') {
+                    $message .= ' Last error: ' . sanitize_text_field((string) $error_message) . '.';
+                }
+                if (!empty($examples)) {
+                    $message .= ' Recent failures: ' . implode(', ', array_slice($examples, -3)) . '.';
+                }
+
+                np_order_hub_send_pushover_message(np_order_hub_print_agent_get_alert_title_base() . ' - Print paused', $message);
+            }
+        }
+    }
+
+    if ($changed) {
+        $monitor['circuit_breaker'] = $breaker;
+        np_order_hub_print_agent_save_monitor_state($monitor);
+    }
+
+    return $breaker;
+}
+
 function np_order_hub_print_queue_claim_next_ready_job($agent_name = '') {
     np_order_hub_print_queue_release_stale_printing_jobs();
 
     $jobs = np_order_hub_print_queue_get_jobs();
     if (empty($jobs)) {
         return null;
+    }
+    $agent_name = sanitize_text_field((string) $agent_name);
+
+    // Guard against overlapping workers using the same agent name.
+    // If this agent already has an active claimed/printing job, do not claim a new one yet.
+    if ($agent_name !== '') {
+        $now = time();
+        foreach ($jobs as $job) {
+            if (!is_array($job)) {
+                continue;
+            }
+            if ((isset($job['status']) ? (string) $job['status'] : '') !== 'printing') {
+                continue;
+            }
+            $claim_by = isset($job['claim_by']) ? sanitize_text_field((string) $job['claim_by']) : '';
+            if ($claim_by === '' || !hash_equals($claim_by, $agent_name)) {
+                continue;
+            }
+            $expires_gmt = isset($job['claim_expires_gmt']) ? (string) $job['claim_expires_gmt'] : '';
+            $expires_ts = $expires_gmt !== '' ? strtotime($expires_gmt . ' GMT') : 0;
+            if ($expires_ts === 0 || $expires_ts >= $now) {
+                return null;
+            }
+        }
     }
 
     $ready_keys = array();
@@ -52,7 +300,7 @@ function np_order_hub_print_queue_claim_next_ready_job($agent_name = '') {
     return np_order_hub_print_queue_build_agent_payload($selected_key, $job);
 }
 
-function np_order_hub_print_queue_finish_claimed_job($job_key, $claim_id, $success, $error_message = '') {
+function np_order_hub_print_queue_finish_claimed_job($job_key, $claim_id, $success, $error_message = '', $print_meta = array(), $agent_name = '') {
     $job_key = sanitize_text_field((string) $job_key);
     $claim_id = sanitize_text_field((string) $claim_id);
     if ($job_key === '' || $claim_id === '') {
@@ -71,32 +319,123 @@ function np_order_hub_print_queue_finish_claimed_job($job_key, $claim_id, $succe
 
     $job['updated_at_gmt'] = gmdate('Y-m-d H:i:s');
     $job['claim_expires_gmt'] = '';
+    $agent_name = sanitize_text_field((string) $agent_name);
+    if ($agent_name === '') {
+        $agent_name = isset($job['claim_by']) ? sanitize_text_field((string) $job['claim_by']) : '';
+    }
+
+    $print_meta = np_order_hub_print_queue_normalize_print_meta($print_meta);
+    if ($agent_name !== '' && empty($print_meta['agent_name'])) {
+        $print_meta['agent_name'] = $agent_name;
+    }
+    if (!empty($print_meta)) {
+        $job['last_print_meta'] = $print_meta;
+        $job['last_cups_job_ids'] = isset($print_meta['cups_job_ids']) ? (string) $print_meta['cups_job_ids'] : '';
+        if ($agent_name !== '') {
+            $job['last_print_agent'] = $agent_name;
+        }
+    }
+    $cups_summary = np_order_hub_print_queue_get_cups_job_summary($print_meta);
+    $verification_state = isset($print_meta['verification_state']) ? sanitize_key((string) $print_meta['verification_state']) : '';
+    $verification_note = isset($print_meta['verification_note']) ? sanitize_text_field((string) $print_meta['verification_note']) : '';
+    $verified_at_gmt = isset($print_meta['verified_at_gmt']) ? sanitize_text_field((string) $print_meta['verified_at_gmt']) : '';
 
     if ($success) {
         $job['status'] = 'completed';
         $job['completed_at_gmt'] = gmdate('Y-m-d H:i:s');
         $job['print_error'] = '';
         $job['last_error'] = '';
-        np_order_hub_print_queue_append_log($job, 'Printed successfully by agent.');
+        if ($verification_state === '') {
+            $verification_state = !empty($print_meta) ? 'needs_review' : '';
+        }
+        if ($verification_state !== '') {
+            $job['print_verification_status'] = $verification_state;
+        }
+        if ($verified_at_gmt !== '') {
+            $job['print_verified_at_gmt'] = $verified_at_gmt;
+        }
+        $job['manual_print_confirmed_at_gmt'] = '';
+
+        if ($verification_state === 'verified') {
+            $message = 'Printed successfully by agent. Verification: verified.';
+        } else {
+            $message = 'Printed by agent, but physical print should be checked manually.';
+            if ($verification_note !== '') {
+                $message .= ' ' . $verification_note;
+            }
+        }
+        if ($cups_summary !== '') {
+            $message .= ' CUPS jobs: ' . $cups_summary . '.';
+        }
+        np_order_hub_print_queue_append_log($job, $message);
+        if ($verification_state === 'needs_review' && function_exists('np_order_hub_send_pushover_message')) {
+            $order_label = isset($job['order_number']) && $job['order_number'] !== '' ? '#' . (string) $job['order_number'] : '#' . (string) ($job['order_id'] ?? '');
+            $store_label = isset($job['store_name']) ? sanitize_text_field((string) $job['store_name']) : '';
+            $alert_message = 'Printjobb må sjekkes manuelt: ' . $order_label;
+            if ($store_label !== '') {
+                $alert_message .= ' ' . $store_label;
+            }
+            if ($verification_note !== '') {
+                $alert_message .= '. ' . $verification_note;
+            }
+            np_order_hub_send_pushover_message(np_order_hub_print_agent_get_alert_title_base() . ' - Print check', $alert_message);
+        }
     } else {
         $job['print_attempts'] = isset($job['print_attempts']) ? ((int) $job['print_attempts'] + 1) : 1;
         $job['print_error'] = sanitize_text_field((string) $error_message);
         $job['last_error'] = $job['print_error'];
         if ((int) $job['print_attempts'] >= 5) {
             $job['status'] = 'failed_print';
-            np_order_hub_print_queue_append_log($job, 'Print failed permanently: ' . $job['print_error']);
+            $message = 'Print failed permanently: ' . $job['print_error'];
         } else {
             $job['status'] = 'ready';
-            np_order_hub_print_queue_append_log($job, 'Print failed, returned to ready: ' . $job['print_error']);
+            $message = 'Print failed, returned to ready: ' . $job['print_error'];
         }
+        if ($cups_summary !== '') {
+            $message .= ' CUPS jobs: ' . $cups_summary . '.';
+        }
+        np_order_hub_print_queue_append_log($job, $message);
     }
 
     $job['claim_id'] = '';
     $job['claim_by'] = '';
     $jobs[$job_key] = $job;
     np_order_hub_print_queue_save_jobs($jobs);
+    np_order_hub_print_agent_register_result((bool) $success, $job_key, $success ? '' : (string) $job['print_error'], $print_meta, $agent_name);
 
     return np_order_hub_print_queue_build_agent_payload($job_key, $job);
+}
+
+function np_order_hub_print_queue_mark_manually_confirmed($job_key) {
+    $job_key = sanitize_text_field((string) $job_key);
+    if ($job_key === '') {
+        return new WP_Error('print_confirm_missing_key', 'Missing print job key.');
+    }
+
+    $job = np_order_hub_print_queue_get_job($job_key);
+    if (!is_array($job)) {
+        return new WP_Error('print_confirm_missing_job', 'Print job not found.');
+    }
+
+    $status = isset($job['status']) ? sanitize_key((string) $job['status']) : '';
+    if ($status !== 'completed') {
+        return new WP_Error('print_confirm_invalid_status', 'Only completed print jobs can be manually confirmed.');
+    }
+
+    $confirmed_at_gmt = gmdate('Y-m-d H:i:s');
+    $job['print_verification_status'] = 'manual_confirmed';
+    $job['manual_print_confirmed_at_gmt'] = $confirmed_at_gmt;
+
+    $meta = isset($job['last_print_meta']) && is_array($job['last_print_meta'])
+        ? np_order_hub_print_queue_normalize_print_meta($job['last_print_meta'])
+        : array();
+    $meta['manual_confirmed_at_gmt'] = $confirmed_at_gmt;
+    $job['last_print_meta'] = $meta;
+
+    np_order_hub_print_queue_append_log($job, 'Print manually confirmed in hub admin.');
+    np_order_hub_print_queue_set_job($job_key, $job);
+
+    return true;
 }
 
 function np_order_hub_print_queue_get_active_jobs($jobs) {
@@ -147,22 +486,12 @@ function np_order_hub_print_agent_monitor_health() {
 
     $stale = $active_count > 0 && ($last_seen_ts < 1 || $heartbeat_age > NP_ORDER_HUB_PRINT_AGENT_STALE_SECONDS);
 
-    $monitor = get_option(NP_ORDER_HUB_PRINT_AGENT_MONITOR_OPTION, array());
-    if (!is_array($monitor)) {
-        $monitor = array();
-    }
+    $monitor = np_order_hub_print_agent_get_monitor_state();
     $alert_open = !empty($monitor['alert_open']);
     $last_alert_ts = isset($monitor['last_alert_ts']) ? (int) $monitor['last_alert_ts'] : 0;
     $cooldown = max(60, (int) NP_ORDER_HUB_PRINT_AGENT_ALERT_COOLDOWN_SECONDS);
     $changed = false;
-
-    $title_base = 'Order Hub';
-    if (function_exists('np_order_hub_get_pushover_settings')) {
-        $settings = np_order_hub_get_pushover_settings();
-        if (is_array($settings) && !empty($settings['title'])) {
-            $title_base = (string) $settings['title'];
-        }
-    }
+    $title_base = np_order_hub_print_agent_get_alert_title_base();
 
     if ($stale) {
         $should_alert = !$alert_open || ($now - $last_alert_ts) >= $cooldown;
@@ -284,6 +613,18 @@ function np_order_hub_print_agent_claim(WP_REST_Request $request) {
     }
 
     $agent_name = sanitize_text_field((string) $request->get_param('agent'));
+    $breaker = np_order_hub_print_agent_get_circuit_breaker_state(true);
+    if (!empty($breaker['open'])) {
+        np_order_hub_print_agent_update_heartbeat($agent_name, 'claim', array('status' => 'paused'));
+        np_order_hub_print_agent_monitor_health();
+        return new WP_REST_Response(array(
+            'status' => 'paused',
+            'error' => 'circuit_breaker_open',
+            'resume_at_gmt' => (string) ($breaker['open_until_gmt'] ?? ''),
+            'reason' => (string) ($breaker['last_reason'] ?? ''),
+            'server_time_gmt' => gmdate('Y-m-d H:i:s'),
+        ), 200);
+    }
     // Make sure due jobs are materialized into "ready" PDFs before claim.
     np_order_hub_print_queue_run_due_jobs(10);
     $job = np_order_hub_print_queue_claim_next_ready_job($agent_name);
@@ -316,6 +657,7 @@ function np_order_hub_print_agent_finish(WP_REST_Request $request) {
 
     $job_key = sanitize_text_field((string) $request->get_param('job_key'));
     $claim_id = sanitize_text_field((string) $request->get_param('claim_id'));
+    $agent_name = sanitize_text_field((string) $request->get_param('agent'));
     $success_raw = $request->get_param('success');
     $success = filter_var($success_raw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
     if ($success === null) {
@@ -323,8 +665,28 @@ function np_order_hub_print_agent_finish(WP_REST_Request $request) {
         $success = in_array($status_raw, array('done', 'ok', 'success', 'printed', 'completed'), true);
     }
     $error_message = sanitize_text_field((string) $request->get_param('error'));
-    $result = np_order_hub_print_queue_finish_claimed_job($job_key, $claim_id, (bool) $success, $error_message);
-    np_order_hub_print_agent_update_heartbeat('', 'finish', array(
+    $request_meta = $request->get_param('print_meta');
+    $print_meta = array(
+        'agent_name' => $agent_name,
+        'mode' => sanitize_key((string) $request->get_param('print_mode')),
+        'cups_job_ids' => sanitize_text_field((string) $request->get_param('cups_job_ids')),
+        'cups_job_map' => sanitize_text_field((string) $request->get_param('cups_job_map')),
+        'failure_stage' => sanitize_text_field((string) $request->get_param('failure_stage')),
+        'failure_code' => sanitize_key((string) $request->get_param('failure_code')),
+        'hard_failure' => filter_var($request->get_param('hard_failure'), FILTER_VALIDATE_BOOLEAN),
+        'verified_at_gmt' => sanitize_text_field((string) $request->get_param('verified_at_gmt')),
+    );
+    if (is_array($request_meta)) {
+        $print_meta = array_merge($request_meta, $print_meta);
+    } elseif (is_string($request_meta) && $request_meta !== '') {
+        $decoded_meta = json_decode($request_meta, true);
+        if (is_array($decoded_meta)) {
+            $print_meta = array_merge($decoded_meta, $print_meta);
+        }
+    }
+
+    $result = np_order_hub_print_queue_finish_claimed_job($job_key, $claim_id, (bool) $success, $error_message, $print_meta, $agent_name);
+    np_order_hub_print_agent_update_heartbeat($agent_name, 'finish', array(
         'status' => $success ? 'success' : 'failed',
         'job_key' => $job_key,
     ));

@@ -121,9 +121,12 @@ function np_order_hub_help_scout_extract_customer_id($conversation) {
     return 0;
 }
 
-function np_order_hub_maybe_notify_new_order($store, $order_number, $order_id, $status, $total, $currency) {
+function np_order_hub_maybe_notify_new_order($store, $order_number, $order_id, $status, $total, $currency, $is_special_order = false) {
     $settings = np_order_hub_get_pushover_settings();
     if (empty($settings['enabled']) || $settings['user'] === '' || $settings['token'] === '') {
+        return;
+    }
+    if ($is_special_order) {
         return;
     }
     $normalized_status = sanitize_key((string) $status);

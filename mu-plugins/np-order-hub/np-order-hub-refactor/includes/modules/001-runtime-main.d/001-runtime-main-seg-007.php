@@ -142,6 +142,242 @@ function np_order_hub_print_agent_get_heartbeat() {
     return is_array($state) ? $state : array();
 }
 
+function np_order_hub_print_queue_parse_cups_job_map($value) {
+    $jobs = array();
+
+    if (is_array($value)) {
+        foreach ($value as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $stage = sanitize_text_field((string) ($row['stage'] ?? ''));
+            $job_id = preg_replace('/[^0-9]/', '', (string) ($row['job_id'] ?? ''));
+            if ($job_id === '') {
+                continue;
+            }
+            if ($stage === '') {
+                $stage = 'job';
+            }
+            $jobs[] = array(
+                'stage' => $stage,
+                'job_id' => $job_id,
+            );
+        }
+        return $jobs;
+    }
+
+    $value = trim((string) $value);
+    if ($value === '') {
+        return $jobs;
+    }
+
+    foreach (explode('||', $value) as $chunk) {
+        $chunk = trim((string) $chunk);
+        if ($chunk === '') {
+            continue;
+        }
+        $parts = explode('::', $chunk, 2);
+        $stage = sanitize_text_field((string) ($parts[0] ?? 'job'));
+        $job_id = preg_replace('/[^0-9]/', '', (string) ($parts[1] ?? ''));
+        if ($job_id === '') {
+            continue;
+        }
+        if ($stage === '') {
+            $stage = 'job';
+        }
+        $jobs[] = array(
+            'stage' => $stage,
+            'job_id' => $job_id,
+        );
+    }
+
+    return $jobs;
+}
+
+function np_order_hub_print_queue_normalize_print_meta($meta) {
+    if (is_string($meta) && $meta !== '') {
+        $decoded = json_decode($meta, true);
+        if (is_array($decoded)) {
+            $meta = $decoded;
+        }
+    }
+
+    if (!is_array($meta)) {
+        return array();
+    }
+
+    $cups_jobs = array();
+    if (!empty($meta['cups_jobs'])) {
+        $cups_jobs = np_order_hub_print_queue_parse_cups_job_map($meta['cups_jobs']);
+    } elseif (!empty($meta['cups_job_map'])) {
+        $cups_jobs = np_order_hub_print_queue_parse_cups_job_map($meta['cups_job_map']);
+    }
+
+    if (empty($cups_jobs) && !empty($meta['cups_job_ids'])) {
+        $ids = preg_split('/\s*,\s*/', (string) $meta['cups_job_ids']);
+        $index = 0;
+        foreach ((array) $ids as $id) {
+            $id = preg_replace('/[^0-9]/', '', (string) $id);
+            if ($id === '') {
+                continue;
+            }
+            $index++;
+            $cups_jobs[] = array(
+                'stage' => 'job_' . $index,
+                'job_id' => $id,
+            );
+        }
+    }
+
+    $cups_job_ids = array();
+    foreach ($cups_jobs as $row) {
+        if (!empty($row['job_id'])) {
+            $cups_job_ids[] = (string) $row['job_id'];
+        }
+    }
+
+    return array(
+        'agent_name' => sanitize_text_field((string) ($meta['agent_name'] ?? '')),
+        'mode' => sanitize_key((string) ($meta['mode'] ?? '')),
+        'cups_jobs' => $cups_jobs,
+        'cups_job_ids' => implode(',', array_values(array_unique($cups_job_ids))),
+        'failure_stage' => sanitize_text_field((string) ($meta['failure_stage'] ?? '')),
+        'failure_code' => sanitize_key((string) ($meta['failure_code'] ?? '')),
+        'hard_failure' => !empty($meta['hard_failure']),
+        'verified_at_gmt' => sanitize_text_field((string) ($meta['verified_at_gmt'] ?? '')),
+        'verification_state' => sanitize_key((string) ($meta['verification_state'] ?? '')),
+        'verification_method' => sanitize_text_field((string) ($meta['verification_method'] ?? '')),
+        'verification_note' => sanitize_text_field((string) ($meta['verification_note'] ?? '')),
+        'manual_confirmed_at_gmt' => sanitize_text_field((string) ($meta['manual_confirmed_at_gmt'] ?? '')),
+    );
+}
+
+function np_order_hub_print_queue_get_verification_summary($job) {
+    if (!is_array($job)) {
+        return array(
+            'key' => 'unknown',
+            'label' => 'Ukjent',
+            'detail' => '',
+            'needs_review' => false,
+        );
+    }
+
+    $status = isset($job['status']) ? sanitize_key((string) $job['status']) : '';
+    $meta = isset($job['last_print_meta']) && is_array($job['last_print_meta'])
+        ? np_order_hub_print_queue_normalize_print_meta($job['last_print_meta'])
+        : array();
+
+    $manual_confirmed_at = isset($job['manual_print_confirmed_at_gmt']) ? sanitize_text_field((string) $job['manual_print_confirmed_at_gmt']) : '';
+    if ($manual_confirmed_at === '' && !empty($meta['manual_confirmed_at_gmt'])) {
+        $manual_confirmed_at = sanitize_text_field((string) $meta['manual_confirmed_at_gmt']);
+    }
+    if ($manual_confirmed_at !== '') {
+        return array(
+            'key' => 'manual_confirmed',
+            'label' => 'Manuelt bekreftet',
+            'detail' => get_date_from_gmt($manual_confirmed_at, 'd.m.y H:i:s'),
+            'needs_review' => false,
+        );
+    }
+
+    $explicit_status = isset($job['print_verification_status']) ? sanitize_key((string) $job['print_verification_status']) : '';
+    $verified_at = isset($job['print_verified_at_gmt']) ? sanitize_text_field((string) $job['print_verified_at_gmt']) : '';
+    if ($verified_at === '' && !empty($meta['verified_at_gmt'])) {
+        $verified_at = sanitize_text_field((string) $meta['verified_at_gmt']);
+    }
+
+    $verification_method = isset($meta['verification_method']) ? sanitize_text_field((string) $meta['verification_method']) : '';
+    $verification_note = isset($meta['verification_note']) ? sanitize_text_field((string) $meta['verification_note']) : '';
+    $meta_state = isset($meta['verification_state']) ? sanitize_key((string) $meta['verification_state']) : '';
+
+    if ($explicit_status === 'verified' || ($explicit_status === '' && $meta_state === 'verified' && $verified_at !== '')) {
+        $detail = $verified_at !== '' ? get_date_from_gmt($verified_at, 'd.m.y H:i:s') : '';
+        if ($verification_method !== '') {
+            $detail = trim($detail . ' ' . '(' . $verification_method . ')');
+        }
+        return array(
+            'key' => 'verified',
+            'label' => 'Verifisert',
+            'detail' => $detail,
+            'needs_review' => false,
+        );
+    }
+
+    if ($explicit_status === 'needs_review' || ($explicit_status === '' && $status === 'completed' && !empty($meta))) {
+        return array(
+            'key' => 'needs_review',
+            'label' => 'Må sjekkes',
+            'detail' => $verification_note,
+            'needs_review' => true,
+        );
+    }
+
+    if ($status === 'completed') {
+        return array(
+            'key' => 'legacy_unknown',
+            'label' => 'Legacy/ukjent',
+            'detail' => '',
+            'needs_review' => false,
+        );
+    }
+
+    return array(
+        'key' => 'not_completed',
+        'label' => '—',
+        'detail' => '',
+        'needs_review' => false,
+    );
+}
+
+function np_order_hub_print_queue_job_needs_review($job) {
+    $summary = np_order_hub_print_queue_get_verification_summary($job);
+    return !empty($summary['needs_review']);
+}
+
+function np_order_hub_print_queue_format_cups_stage_label($stage) {
+    $stage = sanitize_key((string) $stage);
+    if ($stage === '') {
+        return 'Job';
+    }
+
+    $labels = array(
+        'packing_slip' => 'Pakkseddel',
+        'shipping_label' => 'Fraktetikett',
+        'merged_document' => 'Samlet PDF',
+        'page_1' => 'Side 1',
+        'page_2' => 'Side 2',
+        'job_1' => 'Jobb 1',
+        'job_2' => 'Jobb 2',
+    );
+    if (isset($labels[$stage])) {
+        return $labels[$stage];
+    }
+
+    return ucwords(str_replace(array('_', '-'), ' ', $stage));
+}
+
+function np_order_hub_print_queue_get_cups_job_summary($job_or_meta) {
+    if (is_array($job_or_meta) && isset($job_or_meta['last_print_meta']) && is_array($job_or_meta['last_print_meta'])) {
+        $job_or_meta = $job_or_meta['last_print_meta'];
+    }
+
+    $meta = np_order_hub_print_queue_normalize_print_meta($job_or_meta);
+    if (empty($meta['cups_jobs'])) {
+        return '';
+    }
+
+    $parts = array();
+    foreach ($meta['cups_jobs'] as $row) {
+        $job_id = isset($row['job_id']) ? (string) $row['job_id'] : '';
+        if ($job_id === '') {
+            continue;
+        }
+        $parts[] = np_order_hub_print_queue_format_cups_stage_label((string) ($row['stage'] ?? 'job')) . ': ' . $job_id;
+    }
+
+    return implode(', ', $parts);
+}
+
 function np_order_hub_print_queue_append_log(&$job, $message) {
     $message = trim((string) $message);
     if ($message === '') {
@@ -239,6 +475,13 @@ function np_order_hub_print_queue_should_enqueue($store, $record, $payload = arr
     if (!is_array($store) || !is_array($record)) {
         return false;
     }
+    $store_key = isset($record['store_key']) ? sanitize_key((string) $record['store_key']) : '';
+    if ($store_key === '' && !empty($store['key'])) {
+        $store_key = sanitize_key((string) $store['key']);
+    }
+    if ($store_key !== '' && np_order_hub_is_revenue_only_store_key($store_key)) {
+        return false;
+    }
     if (!np_order_hub_print_queue_is_store_allowed($store)) {
         return false;
     }
@@ -284,6 +527,10 @@ function np_order_hub_print_queue_queue_order($store, $record, $reason = 'webhoo
 
     $payload = np_order_hub_print_queue_extract_payload($record);
     if (!np_order_hub_print_queue_should_enqueue($store, $record, $payload)) {
+        $existing = np_order_hub_print_queue_get_job($job_key);
+        if (is_array($existing)) {
+            np_order_hub_print_queue_remove_job($job_key);
+        }
         return;
     }
 

@@ -194,6 +194,9 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
     if (!empty($existing_payload['np_bytte_storrelse_source_order']) && empty($data['np_bytte_storrelse_source_order'])) {
         $data['np_bytte_storrelse_source_order'] = (int) $existing_payload['np_bytte_storrelse_source_order'];
     }
+    $is_reklamasjon_order = !empty($data['np_reklamasjon']) || !empty($data['np_reklamasjon_source_order']) || $status === 'reklamasjon';
+    $is_bytte_storrelse_order = !empty($data['np_bytte_storrelse']) || !empty($data['np_bytte_storrelse_source_order']) || $status === 'bytte-storrelse';
+    $is_special_order = $is_reklamasjon_order || $is_bytte_storrelse_order;
 
     $record = array(
         'store_key' => $store['key'],
@@ -223,7 +226,7 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
             return new WP_REST_Response(array('error' => 'db_update_failed'), 500);
         }
         if ($status === 'processing' && $previous_status !== 'processing') {
-            np_order_hub_maybe_notify_new_order($store, $order_number, $order_id, $status, $total, $currency);
+            np_order_hub_maybe_notify_new_order($store, $order_number, $order_id, $status, $total, $currency, $is_special_order);
         }
     } else {
         $record['created_at_gmt'] = $now_gmt;
@@ -237,7 +240,7 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
             )));
             return new WP_REST_Response(array('error' => 'db_insert_failed'), 500);
         }
-        np_order_hub_maybe_notify_new_order($store, $order_number, $order_id, $status, $total, $currency);
+        np_order_hub_maybe_notify_new_order($store, $order_number, $order_id, $status, $total, $currency, $is_special_order);
     }
 
     $record['id'] = $existing_id ? $existing_id : (int) $wpdb->insert_id;
@@ -298,6 +301,7 @@ function np_order_hub_orders_page() {
     echo '<h1>Order Hub</h1>';
     echo '<form method="get">';
     echo '<input type="hidden" name="page" value="np-order-hub" />';
+    $table->search_box('Sok navn eller ordrenr', 'np-order-hub-search');
     $table->display();
     echo '</form>';
     echo '</div>';

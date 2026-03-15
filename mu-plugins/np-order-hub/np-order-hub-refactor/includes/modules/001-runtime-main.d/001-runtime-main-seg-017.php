@@ -22,7 +22,7 @@ function np_order_hub_query_revenue_totals($filters) {
     global $wpdb;
     $table = np_order_hub_table_name();
     $args = array();
-    $where = np_order_hub_build_where_clause($filters, $args, false, true);
+    $where = np_order_hub_build_where_clause($filters, $args, false, true, true);
     $excluded = np_order_hub_get_revenue_excluded_statuses();
     $placeholders = implode(',', array_fill(0, count($excluded), '%s'));
     $exclude_sql = "status NOT IN ($placeholders)";
@@ -43,7 +43,7 @@ function np_order_hub_query_revenue_by_store($filters) {
     global $wpdb;
     $table = np_order_hub_table_name();
     $args = array();
-    $where = np_order_hub_build_where_clause($filters, $args, false, true);
+    $where = np_order_hub_build_where_clause($filters, $args, false, true, true);
     $excluded = np_order_hub_get_revenue_excluded_statuses();
     $placeholders = implode(',', array_fill(0, count($excluded), '%s'));
     $exclude_sql = "status NOT IN ($placeholders)";
@@ -60,7 +60,7 @@ function np_order_hub_query_item_counts($filters) {
     global $wpdb;
     $table = np_order_hub_table_name();
     $args = array();
-    $where = np_order_hub_build_where_clause($filters, $args, false, true);
+    $where = np_order_hub_build_where_clause($filters, $args, false, true, true);
     $excluded = np_order_hub_get_revenue_excluded_statuses();
     $placeholders = implode(',', array_fill(0, count($excluded), '%s'));
     $exclude_sql = "status NOT IN ($placeholders)";

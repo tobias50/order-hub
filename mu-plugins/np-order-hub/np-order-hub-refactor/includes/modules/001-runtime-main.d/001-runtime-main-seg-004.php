@@ -34,6 +34,136 @@ function np_order_hub_build_admin_order_url($store, $order_id) {
     return $admin_base . 'post.php?post=' . (int) $order_id . '&action=edit';
 }
 
+function np_order_hub_get_order_admin_url_for_record($record) {
+    if (!is_array($record)) {
+        return '';
+    }
+
+    $order_id = isset($record['order_id']) ? absint($record['order_id']) : 0;
+    $store_key = isset($record['store_key']) ? sanitize_key((string) $record['store_key']) : '';
+    $store = null;
+    if ($store_key !== '') {
+        $store = np_order_hub_get_store_by_key($store_key);
+    }
+    if (!is_array($store)) {
+        $store = np_order_hub_guess_store_for_record($record);
+    }
+    if ($order_id > 0 && is_array($store) && !empty($store['url'])) {
+        $dynamic_url = np_order_hub_build_admin_order_url($store, $order_id);
+        if ($dynamic_url !== '') {
+            return $dynamic_url;
+        }
+    }
+
+    $fallback = isset($record['order_admin_url']) ? trim((string) $record['order_admin_url']) : '';
+    if (np_order_hub_is_deprecated_store_admin_url($fallback)) {
+        return '';
+    }
+    return $fallback;
+}
+
+function np_order_hub_is_deprecated_store_admin_url($url) {
+    $url = trim((string) $url);
+    if ($url === '') {
+        return false;
+    }
+    $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
+    if ($host === '') {
+        return false;
+    }
+    $host = trim($host, '.');
+    if ($host === 'root.nordicprofil.no') {
+        return true;
+    }
+    return strpos($host, '.root.nordicprofil.no') !== false;
+}
+
+function np_order_hub_guess_store_for_record($record) {
+    if (!is_array($record)) {
+        return null;
+    }
+
+    $stores = np_order_hub_get_stores();
+    if (empty($stores) || !is_array($stores)) {
+        return null;
+    }
+
+    $hints = array();
+    $store_key = sanitize_key((string) ($record['store_key'] ?? ''));
+    if ($store_key !== '') {
+        $parts = explode('_', $store_key);
+        if (!empty($parts[0])) {
+            $hints[] = sanitize_key((string) $parts[0]);
+        }
+    }
+
+    $store_name = strtolower(trim((string) ($record['store_name'] ?? '')));
+    if ($store_name !== '') {
+        $hints[] = sanitize_key(preg_replace('/[^a-z0-9]+/', '', $store_name));
+    }
+
+    $store_url = trim((string) ($record['store_url'] ?? ''));
+    if ($store_url !== '') {
+        $host = strtolower((string) wp_parse_url($store_url, PHP_URL_HOST));
+        if ($host !== '') {
+            $host_parts = explode('.', $host);
+            if (!empty($host_parts[0])) {
+                $hints[] = sanitize_key((string) $host_parts[0]);
+            }
+        }
+    }
+
+    $hints = array_values(array_unique(array_filter($hints, function ($hint) {
+        return is_string($hint) && strlen($hint) >= 3 && !in_array($hint, array('root', 'nordicprofil'), true);
+    })));
+    if (empty($hints)) {
+        return null;
+    }
+
+    $best_store = null;
+    $best_score = 0;
+    $second_best = 0;
+
+    foreach ($stores as $store) {
+        if (!is_array($store)) {
+            continue;
+        }
+        $candidate_key = sanitize_key((string) ($store['key'] ?? ''));
+        $candidate_name = sanitize_key((string) ($store['name'] ?? ''));
+        $candidate_url_host = sanitize_key((string) wp_parse_url((string) ($store['url'] ?? ''), PHP_URL_HOST));
+        $score = 0;
+
+        foreach ($hints as $hint) {
+            if ($candidate_key !== '' && strpos($candidate_key, $hint) !== false) {
+                $score += 3;
+            }
+            if ($candidate_name !== '' && strpos($candidate_name, $hint) !== false) {
+                $score += 2;
+            }
+            if ($candidate_url_host !== '' && strpos($candidate_url_host, $hint) !== false) {
+                $score += 2;
+            }
+        }
+
+        if ($score > $best_score) {
+            $second_best = $best_score;
+            $best_score = $score;
+            $best_store = $store;
+        } elseif ($score > $second_best) {
+            $second_best = $score;
+        }
+    }
+
+    if ($best_score < 3) {
+        return null;
+    }
+    if ($second_best > 0 && $best_score <= ($second_best + 1)) {
+        return null;
+    }
+
+    return $best_store;
+}
+
 function np_order_hub_build_admin_orders_url($store) {
     if (!is_array($store) || empty($store['url'])) {
         return '';

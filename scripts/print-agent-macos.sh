@@ -14,19 +14,20 @@ set -euo pipefail
 #   HUB_API_BASE   defaults to ${HUB_BASE_URL}/index.php/wp-json
 #   LP_TIMEOUT_SECONDS defaults to 45
 #   CURL_TIMEOUT_SECONDS defaults to 45
+#   HTTP_RETRY_ATTEMPTS defaults to 3
+#   HTTP_RETRY_DELAY_SECONDS defaults to 2
 #   SELF_UPDATE_ENABLED defaults to true
 #   SELF_UPDATE_URL defaults to ${HUB_BASE_URL}/wp-content/uploads/np-order-hub-print-agent/print-agent-macos.sh
-#   LP_MEDIA defaults to "Print label"
+#   LP_MEDIA is locked to Custom.102.7x190mm
 #   LP_EXTRA_OPTIONS comma-separated (defaults set for top-aligned label print)
 #   LP_IMAGE_OPTIONS comma-separated (defaults set for raster/image print)
-#   LP_SPLIT_PAGES defaults to true (print page 1 and 2 as separate jobs)
-#   LP_RASTER_DPI defaults to 300
-#   LABEL_WIDTH_MM defaults to 102.7
-#   LABEL_HEIGHT_MM defaults to 190
+#   LP_SPLIT_PAGES defaults to false (merged PDF fallback stays single-job)
+#   LP_RASTER_DPI is locked to 203
+#   LABEL_WIDTH_MM is locked to 102.7
+#   LABEL_HEIGHT_MM is locked to 190
 #   LP_RASTERIZE_LABEL defaults to true
-#   LP_VERIFY_SECONDS defaults to 45 (wait for CUPS queue acceptance/completion signal)
-#   Note: when claim payload includes `packing_url` + `label_url`, agent prints them as two
-#         independent print jobs (packing first, then label) to avoid multi-page PDF quirks.
+#   LP_VERIFY_SECONDS defaults to 120 (wait for verified CUPS/IPP completion signal)
+#   LP_FORCE_MERGED_JOB defaults to false (Zebra is more reliable with rasterized slip+label)
 #
 # Example:
 #   HUB_BASE_URL="https://ordrehub.nordicprofil.no" \
@@ -42,20 +43,63 @@ AGENT_NAME="${AGENT_NAME:-lager-mac-1}"
 HUB_API_BASE="${HUB_API_BASE:-${HUB_BASE_URL%/}/index.php/wp-json}"
 LP_TIMEOUT_SECONDS="${LP_TIMEOUT_SECONDS:-45}"
 CURL_TIMEOUT_SECONDS="${CURL_TIMEOUT_SECONDS:-45}"
+HTTP_RETRY_ATTEMPTS="${HTTP_RETRY_ATTEMPTS:-3}"
+HTTP_RETRY_DELAY_SECONDS="${HTTP_RETRY_DELAY_SECONDS:-2}"
 SELF_UPDATE_ENABLED="${SELF_UPDATE_ENABLED:-true}"
 SELF_UPDATE_URL="${SELF_UPDATE_URL:-${HUB_BASE_URL%/}/wp-content/uploads/np-order-hub-print-agent/print-agent-macos.sh}"
-LP_MEDIA="${LP_MEDIA:-Print label}"
+# Width lock for stable label format. Do not relax this without explicit printer re-calibration.
+LP_MEDIA_REQUESTED="${LP_MEDIA:-}"
+LP_RASTER_DPI_REQUESTED="${LP_RASTER_DPI:-}"
+LABEL_WIDTH_MM_REQUESTED="${LABEL_WIDTH_MM:-}"
+LABEL_HEIGHT_MM_REQUESTED="${LABEL_HEIGHT_MM:-}"
+LOCKED_LABEL_WIDTH_MM="102.7"
+LOCKED_LABEL_HEIGHT_MM="190"
+LOCKED_RASTER_DPI="203"
+LOCKED_MEDIA="Custom.${LOCKED_LABEL_WIDTH_MM}x${LOCKED_LABEL_HEIGHT_MM}mm"
+LABEL_WIDTH_MM="${LOCKED_LABEL_WIDTH_MM}"
+LABEL_HEIGHT_MM="${LOCKED_LABEL_HEIGHT_MM}"
+LP_RASTER_DPI="${LOCKED_RASTER_DPI}"
+LP_MEDIA="${LOCKED_MEDIA}"
 # Force 1:1 print by default (no fit-to-page shrink). Keep top-left with zero margins.
 LP_EXTRA_OPTIONS="${LP_EXTRA_OPTIONS:-print-scaling=none,position=top-left,scaling=100,number-up=1,sides=one-sided,page-top=0,page-bottom=0,page-left=0,page-right=0}"
 # For rasterized images, use fit-to-page so CUPS/driver DPI assumptions do not shrink label width.
 LP_IMAGE_OPTIONS="${LP_IMAGE_OPTIONS:-fit-to-page,position=top-left,number-up=1,sides=one-sided,page-top=0,page-bottom=0,page-left=0,page-right=0}"
-LP_SPLIT_PAGES="${LP_SPLIT_PAGES:-true}"
-LP_RASTER_DPI="${LP_RASTER_DPI:-300}"
-LABEL_WIDTH_MM="${LABEL_WIDTH_MM:-102.7}"
-LABEL_HEIGHT_MM="${LABEL_HEIGHT_MM:-190}"
+LP_SPLIT_PAGES="${LP_SPLIT_PAGES:-false}"
+LP_FORCE_MERGED_JOB="${LP_FORCE_MERGED_JOB:-false}"
 LP_RASTERIZE_LABEL="${LP_RASTERIZE_LABEL:-true}"
-LP_VERIFY_SECONDS="${LP_VERIFY_SECONDS:-45}"
+LP_VERIFY_SECONDS="${LP_VERIFY_SECONDS:-120}"
 LP_MEDIA_RESOLVED=""
+
+if ! [[ "${HTTP_RETRY_ATTEMPTS}" =~ ^[0-9]+$ ]] || [[ "${HTTP_RETRY_ATTEMPTS}" -lt 1 ]]; then
+  HTTP_RETRY_ATTEMPTS="3"
+fi
+if ! [[ "${HTTP_RETRY_DELAY_SECONDS}" =~ ^[0-9]+$ ]] || [[ "${HTTP_RETRY_DELAY_SECONDS}" -lt 0 ]]; then
+  HTTP_RETRY_DELAY_SECONDS="2"
+fi
+if ! [[ "${LP_VERIFY_SECONDS}" =~ ^[0-9]+$ ]] || [[ "${LP_VERIFY_SECONDS}" -lt 120 ]]; then
+  LP_VERIFY_SECONDS="120"
+fi
+
+force_merged_job_lc="$(printf '%s' "${LP_FORCE_MERGED_JOB}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${force_merged_job_lc}" == "1" || "${force_merged_job_lc}" == "true" || "${force_merged_job_lc}" == "yes" ]]; then
+  LP_FORCE_MERGED_JOB="true"
+  LP_SPLIT_PAGES="false"
+else
+  LP_FORCE_MERGED_JOB="false"
+fi
+
+if [[ -n "${LP_MEDIA_REQUESTED}" && "${LP_MEDIA_REQUESTED}" != "${LP_MEDIA}" ]]; then
+  echo "Ignoring LP_MEDIA override '${LP_MEDIA_REQUESTED}'. Using locked '${LP_MEDIA}'." >&2
+fi
+if [[ -n "${LABEL_WIDTH_MM_REQUESTED}" && "${LABEL_WIDTH_MM_REQUESTED}" != "${LABEL_WIDTH_MM}" ]]; then
+  echo "Ignoring LABEL_WIDTH_MM override '${LABEL_WIDTH_MM_REQUESTED}'. Using locked '${LABEL_WIDTH_MM}'." >&2
+fi
+if [[ -n "${LABEL_HEIGHT_MM_REQUESTED}" && "${LABEL_HEIGHT_MM_REQUESTED}" != "${LABEL_HEIGHT_MM}" ]]; then
+  echo "Ignoring LABEL_HEIGHT_MM override '${LABEL_HEIGHT_MM_REQUESTED}'. Using locked '${LABEL_HEIGHT_MM}'." >&2
+fi
+if [[ -n "${LP_RASTER_DPI_REQUESTED}" && "${LP_RASTER_DPI_REQUESTED}" != "${LP_RASTER_DPI}" ]]; then
+  echo "Ignoring LP_RASTER_DPI override '${LP_RASTER_DPI_REQUESTED}'. Using locked '${LP_RASTER_DPI}'." >&2
+fi
 
 if [[ -z "${PRINT_TOKEN}" ]]; then
   echo "PRINT_TOKEN is required."
@@ -118,6 +162,38 @@ self_update_if_needed() {
 
 self_update_if_needed
 
+acquire_run_lock() {
+  local lock_dir pid_file existing_pid
+  lock_dir="${TMP_DIR}/run.lock"
+  pid_file="${lock_dir}/pid"
+
+  if mkdir "${lock_dir}" 2>/dev/null; then
+    printf '%s\n' "$$" > "${pid_file}"
+    trap 'rm -rf "'"${lock_dir}"'" >/dev/null 2>&1 || true' EXIT INT TERM
+    return 0
+  fi
+
+  if [[ -f "${pid_file}" ]]; then
+    existing_pid="$(cat "${pid_file}" 2>/dev/null || true)"
+    if [[ "${existing_pid}" =~ ^[0-9]+$ ]] && kill -0 "${existing_pid}" 2>/dev/null; then
+      echo "Another print-agent run is active (pid ${existing_pid}). Skipping this run."
+      exit 0
+    fi
+  fi
+
+  rm -rf "${lock_dir}" >/dev/null 2>&1 || true
+  if mkdir "${lock_dir}" 2>/dev/null; then
+    printf '%s\n' "$$" > "${pid_file}"
+    trap 'rm -rf "'"${lock_dir}"'" >/dev/null 2>&1 || true' EXIT INT TERM
+    return 0
+  fi
+
+  echo "Unable to acquire print-agent run lock. Skipping this run."
+  exit 0
+}
+
+acquire_run_lock
+
 build_json() {
   /usr/bin/python3 - "$@" <<'PY'
 import json
@@ -145,6 +221,7 @@ finish_job() {
   local success="$3"
   local error_message="${4:-}"
   local success_marker="__BOOL_FALSE__"
+  local attempt
   if [[ "${success}" == "true" ]]; then
     success_marker="__BOOL_TRUE__"
   fi
@@ -152,12 +229,33 @@ finish_job() {
   local payload
   payload="$(build_json "job_key=${job_key}" "claim_id=${claim_id}" "success=${success_marker}" "error=${error_message}")"
 
-  curl -sS --connect-timeout 10 --max-time "${CURL_TIMEOUT_SECONDS}" -X POST "${FINISH_URL}" -H "X-NP-Print-Token: ${PRINT_TOKEN}" -H "Content-Type: application/json" --data "${payload}" >/dev/null || true
+  for ((attempt=1; attempt<=HTTP_RETRY_ATTEMPTS; attempt++)); do
+    if curl -sS --connect-timeout 10 --max-time "${CURL_TIMEOUT_SECONDS}" -X POST "${FINISH_URL}" -H "X-NP-Print-Token: ${PRINT_TOKEN}" -H "Content-Type: application/json" --data "${payload}" >/dev/null; then
+      return 0
+    fi
+    if [[ "${attempt}" -lt "${HTTP_RETRY_ATTEMPTS}" ]]; then
+      sleep "${HTTP_RETRY_DELAY_SECONDS}"
+    fi
+  done
+
+  echo "Finish request failed after ${HTTP_RETRY_ATTEMPTS} attempts (job=${job_key}, claim=${claim_id})." >&2
+  return 1
 }
 
 claim_payload="$(build_json "agent=${AGENT_NAME}")"
-if ! claim_response="$(curl -sS --connect-timeout 10 --max-time "${CURL_TIMEOUT_SECONDS}" -X POST "${CLAIM_URL}" -H "X-NP-Print-Token: ${PRINT_TOKEN}" -H "Content-Type: application/json" --data "${claim_payload}")"; then
-  echo "Claim request failed (network/curl error)." >&2
+claim_response=""
+claim_ok="false"
+for ((claim_attempt=1; claim_attempt<=HTTP_RETRY_ATTEMPTS; claim_attempt++)); do
+  if claim_response="$(curl -sS --connect-timeout 10 --max-time "${CURL_TIMEOUT_SECONDS}" -X POST "${CLAIM_URL}" -H "X-NP-Print-Token: ${PRINT_TOKEN}" -H "Content-Type: application/json" --data "${claim_payload}")"; then
+    claim_ok="true"
+    break
+  fi
+  if [[ "${claim_attempt}" -lt "${HTTP_RETRY_ATTEMPTS}" ]]; then
+    sleep "${HTTP_RETRY_DELAY_SECONDS}"
+  fi
+done
+if [[ "${claim_ok}" != "true" ]]; then
+  echo "Claim request failed after ${HTTP_RETRY_ATTEMPTS} attempts (network/curl error)." >&2
   exit 1
 fi
 
@@ -230,14 +328,34 @@ fi
 download_pdf() {
   local source_url="$1"
   local target_path="$2"
-  local _name="$3"
+  local doc_name="$3"
+  local attempt
+  local header
   if [[ -z "${source_url}" ]]; then
     return 1
   fi
-  if ! curl -fL -sS --connect-timeout 10 --max-time "${CURL_TIMEOUT_SECONDS}" "${source_url}" -o "${target_path}"; then
-    return 1
-  fi
-  [[ -f "${target_path}" ]]
+
+  for ((attempt=1; attempt<=HTTP_RETRY_ATTEMPTS; attempt++)); do
+    rm -f "${target_path}" || true
+    if curl -fL -sS --connect-timeout 10 --max-time "${CURL_TIMEOUT_SECONDS}" "${source_url}" -o "${target_path}"; then
+      if [[ ! -s "${target_path}" ]]; then
+        echo "${doc_name} download is empty (attempt ${attempt}/${HTTP_RETRY_ATTEMPTS})." >&2
+      else
+        header="$(LC_ALL=C head -c 5 "${target_path}" 2>/dev/null || true)"
+        if [[ "${header}" == "%PDF-" ]]; then
+          return 0
+        fi
+        echo "${doc_name} download is not a valid PDF (attempt ${attempt}/${HTTP_RETRY_ATTEMPTS})." >&2
+      fi
+    fi
+
+    rm -f "${target_path}" || true
+    if [[ "${attempt}" -lt "${HTTP_RETRY_ATTEMPTS}" ]]; then
+      sleep "${HTTP_RETRY_DELAY_SECONDS}"
+    fi
+  done
+
+  return 1
 }
 
 detect_pdf_pages() {
@@ -462,6 +580,218 @@ if m:
 PY
 }
 
+extract_lp_job_block() {
+  local queue_id="$1"
+  local state="${2:-all}"
+  lpstat -l -W "${state}" -o "${PRINTER_NAME}" 2>/dev/null | /usr/bin/awk -v id="${queue_id}" '
+function is_job_header(line) {
+  return line ~ /^[^ \t].*-[0-9]+[ \t]/
+}
+{
+  if (is_job_header($0)) {
+    if ($1 == id) {
+      in_block = 1
+    } else if (in_block) {
+      exit
+    } else {
+      in_block = 0
+    }
+  }
+  if (in_block) {
+    print $0
+  }
+}
+'
+}
+
+lp_job_status_summary() {
+  local job_block="$1"
+  local status_text
+  local alerts_text
+  status_text="$(printf '%s\n' "${job_block}" | sed -n 's/^[[:space:]]*Status:[[:space:]]*//p' | head -n 1)"
+  alerts_text="$(printf '%s\n' "${job_block}" | sed -n 's/^[[:space:]]*Alerts:[[:space:]]*//p' | head -n 1)"
+
+  if [[ -z "${status_text}" && -z "${alerts_text}" ]]; then
+    echo "status=unknown"
+    return 0
+  fi
+  if [[ -z "${status_text}" ]]; then
+    status_text="(empty)"
+  fi
+  if [[ -z "${alerts_text}" ]]; then
+    alerts_text="(empty)"
+  fi
+
+  echo "status=${status_text}; alerts=${alerts_text}"
+}
+
+lp_job_has_hard_error() {
+  local job_block="$1"
+  local status_text
+  local alerts_text
+
+  status_text="$(printf '%s\n' "${job_block}" | sed -n 's/^[[:space:]]*Status:[[:space:]]*//p' | head -n 1 | tr '[:upper:]' '[:lower:]')"
+  alerts_text="$(printf '%s\n' "${job_block}" | sed -n 's/^[[:space:]]*Alerts:[[:space:]]*//p' | head -n 1 | tr '[:upper:]' '[:lower:]')"
+
+  if [[ -n "${status_text}" ]] && printf '%s' "${status_text}" | grep -Eqi 'not responding|unreachable|unable|offline|timed out|connection refused|host is down|no route to host|could not'; then
+    return 0
+  fi
+
+  if [[ -n "${alerts_text}" ]] && printf '%s' "${alerts_text}" | grep -Eqi 'printer-error|media-empty|media-jam|door-open|offline|paused|intervention|error'; then
+    return 0
+  fi
+
+  return 1
+}
+
+lp_job_error_log_summary() {
+  local job_id="$1"
+  if [[ -z "${job_id}" || ! -f "/var/log/cups/error_log" ]]; then
+    return 1
+  fi
+
+  local match
+  match="$(rg -i -N "\\[Job ${job_id}\\].*(not responding|unreachable|unable|offline|timed out|connection refused|host is down|no route to host|could not|printer-error|media-empty|media-jam|door-open|paused|intervention|error)" /var/log/cups/error_log 2>/dev/null | tail -n 1 | sed 's/^[[:space:]]*//')"
+  if [[ -z "${match}" ]]; then
+    return 1
+  fi
+
+  echo "${match}"
+  return 0
+}
+
+ipp_job_attributes() {
+  local job_id="$1"
+  if [[ -z "${job_id}" || ! -x "/usr/bin/python3" || ! -f "/usr/share/cups/ipptool/get-job-attributes.test" ]]; then
+    return 0
+  fi
+
+  /usr/bin/python3 - "$job_id" <<'PY'
+import os
+import shlex
+import subprocess
+import sys
+
+job_id = sys.argv[1] if len(sys.argv) > 1 else ""
+if not job_id:
+    raise SystemExit(0)
+
+test_path = "/usr/share/cups/ipptool/get-job-attributes.test"
+if not os.path.exists(test_path):
+    raise SystemExit(0)
+
+try:
+    proc = subprocess.run(
+        ["ipptool", "-tv", f"ipp://localhost/jobs/{job_id}", test_path],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+except Exception:
+    raise SystemExit(0)
+
+text = (proc.stdout or "") + "\n" + (proc.stderr or "")
+fields = {
+    "ipp_job_state": "",
+    "ipp_job_state_reasons": "",
+    "ipp_job_printer_state_message": "",
+    "ipp_job_impressions_completed": "",
+    "ipp_job_media_sheets_completed": "",
+}
+
+patterns = {
+    "ipp_job_state": "job-state (enum) = ",
+    "ipp_job_state_reasons": "job-state-reasons (keyword) = ",
+    "ipp_job_printer_state_message": "job-printer-state-message (textWithoutLanguage) = ",
+    "ipp_job_impressions_completed": "job-impressions-completed (integer) = ",
+    "ipp_job_media_sheets_completed": "job-media-sheets-completed (integer) = ",
+}
+
+for raw_line in text.splitlines():
+    line = raw_line.strip()
+    for key, prefix in patterns.items():
+        if line.startswith(prefix):
+            fields[key] = line[len(prefix):].strip()
+
+for key, value in fields.items():
+    print(f"{key}={shlex.quote(value)}")
+PY
+}
+
+ipp_job_has_hard_error() {
+  local job_state="$1"
+  local printer_message="$2"
+  local state_reasons="${3:-}"
+
+  local state_lc message_lc reasons_lc
+  state_lc="$(printf '%s' "${job_state}" | tr '[:upper:]' '[:lower:]')"
+  message_lc="$(printf '%s' "${printer_message}" | tr '[:upper:]' '[:lower:]')"
+  reasons_lc="$(printf '%s' "${state_reasons}" | tr '[:upper:]' '[:lower:]')"
+
+  if [[ -n "${state_lc}" ]] && printf '%s' "${state_lc}" | grep -Eqi 'canceled|aborted|stopped'; then
+    return 0
+  fi
+
+  if [[ -n "${message_lc}" ]] && printf '%s' "${message_lc}" | grep -Eqi 'not responding|unreachable|unable|offline|timed out|connection refused|host is down|no route to host|could not|printer-error|media-empty|media-jam|door-open|paused|intervention|error'; then
+    return 0
+  fi
+
+  if [[ -n "${reasons_lc}" ]] && printf '%s' "${reasons_lc}" | grep -Eqi 'job-canceled|job-aborted|job-stopped|printer-stopped|printer-error'; then
+    return 0
+  fi
+
+  return 1
+}
+
+ipp_job_is_verified_success() {
+  local job_state="$1"
+  local printer_message="$2"
+  local impressions_completed="${3:-}"
+  local sheets_completed="${4:-}"
+
+  if ipp_job_has_hard_error "${job_state}" "${printer_message}" ""; then
+    return 1
+  fi
+
+  if [[ "${job_state}" != "completed" ]]; then
+    return 1
+  fi
+
+  if [[ -n "${printer_message}" ]]; then
+    return 1
+  fi
+
+  if [[ "${impressions_completed}" =~ ^[0-9]+$ && "${impressions_completed}" -gt 0 ]]; then
+    return 0
+  fi
+
+  if [[ "${sheets_completed}" =~ ^[0-9]+$ && "${sheets_completed}" -gt 0 ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+printer_queue_hard_error_summary() {
+  local queue_dump
+  local first_match
+  queue_dump="$(lpstat -l -W not-completed -o "${PRINTER_NAME}" 2>/dev/null || true)"
+  if [[ -z "${queue_dump}" ]]; then
+    return 1
+  fi
+
+  first_match="$(
+    printf '%s\n' "${queue_dump}" | grep -Eim1 \
+      'Status:[[:space:]]*(.*(not responding|unreachable|unable|offline|timed out|connection refused|host is down|no route to host|could not))|Alerts:[[:space:]]*(.*(printer-error|media-empty|media-jam|door-open|offline|paused|intervention|error))' | sed 's/^[[:space:]]*//'
+  )"
+  if [[ -n "${first_match}" ]]; then
+    echo "${first_match}"
+    return 0
+  fi
+  return 1
+}
+
 verify_lp_submission() {
   local lp_output="$1"
   local stage_label="$2"
@@ -480,6 +810,16 @@ verify_lp_submission() {
   local queue_id="${PRINTER_NAME}-${job_id}"
   local end_ts
   end_ts=$(( $(date +%s) + LP_VERIFY_SECONDS ))
+  local job_block
+  local completed_block
+  local status_summary
+  local log_summary
+  local ipp_assignments
+  local ipp_job_state
+  local ipp_job_state_reasons
+  local ipp_job_printer_state_message
+  local ipp_job_impressions_completed
+  local ipp_job_media_sheets_completed
 
   while [[ $(date +%s) -le ${end_ts} ]]; do
     # If printer queue is disabled, treat as print failure.
@@ -488,15 +828,89 @@ verify_lp_submission() {
       return 1
     fi
 
-    # Job still queued: keep waiting.
-    if lpstat -W not-completed -o "${PRINTER_NAME}" 2>/dev/null | grep -q "${queue_id}"; then
-      sleep 2
-      continue
+    if log_summary="$(lp_job_error_log_summary "${job_id}")"; then
+      echo "spool_error_log (${stage_label}, job=${queue_id}, ${log_summary})"
+      return 1
     fi
 
-    # Job left queue; consider this successful handoff to printer.
-    return 0
+    job_block="$(extract_lp_job_block "${queue_id}" "all" || true)"
+    if [[ -n "${job_block}" ]] && lp_job_has_hard_error "${job_block}"; then
+      status_summary="$(lp_job_status_summary "${job_block}")"
+      echo "spool_error (${stage_label}, job=${queue_id}, ${status_summary})"
+      return 1
+    fi
+
+    ipp_assignments="$(ipp_job_attributes "${job_id}" || true)"
+    if [[ -n "${ipp_assignments}" ]]; then
+      ipp_job_state=""
+      ipp_job_state_reasons=""
+      ipp_job_printer_state_message=""
+      ipp_job_impressions_completed=""
+      ipp_job_media_sheets_completed=""
+      eval "${ipp_assignments}"
+
+      if ipp_job_has_hard_error "${ipp_job_state}" "${ipp_job_printer_state_message}" "${ipp_job_state_reasons}"; then
+        echo "ipp_error (${stage_label}, job=${queue_id}, state=${ipp_job_state:-unknown}, reasons=${ipp_job_state_reasons:-unknown}, message=${ipp_job_printer_state_message:-unknown})"
+        return 1
+      fi
+
+      if ipp_job_is_verified_success "${ipp_job_state}" "${ipp_job_printer_state_message}" "${ipp_job_impressions_completed}" "${ipp_job_media_sheets_completed}"; then
+        return 0
+      fi
+    fi
+
+    completed_block="$(extract_lp_job_block "${queue_id}" "completed" || true)"
+    if [[ -n "${completed_block}" ]] && lp_job_has_hard_error "${completed_block}"; then
+      status_summary="$(lp_job_status_summary "${completed_block}")"
+      echo "completed_with_error (${stage_label}, job=${queue_id}, ${status_summary})"
+      return 1
+    fi
+
+    # Fallback for environments without IPP support: only accept success when the completed
+    # job is still visible in CUPS history. This avoids false positives when a job disappears
+    # from the active queue before CUPS has finalized its terminal state.
+    if [[ -n "${completed_block}" && -z "${ipp_assignments}" ]]; then
+      return 0
+    fi
+
+    sleep 2
   done
+
+  if log_summary="$(lp_job_error_log_summary "${job_id}")"; then
+    echo "spool_error_log_timeout (${stage_label}, job=${queue_id}, ${log_summary})"
+    return 1
+  fi
+
+  job_block="$(extract_lp_job_block "${queue_id}" "all" || true)"
+  if [[ -n "${job_block}" ]] && lp_job_has_hard_error "${job_block}"; then
+    status_summary="$(lp_job_status_summary "${job_block}")"
+    echo "spool_error_timeout (${stage_label}, job=${queue_id}, ${status_summary})"
+    return 1
+  fi
+
+  ipp_assignments="$(ipp_job_attributes "${job_id}" || true)"
+  if [[ -n "${ipp_assignments}" ]]; then
+    ipp_job_state=""
+    ipp_job_state_reasons=""
+    ipp_job_printer_state_message=""
+    ipp_job_impressions_completed=""
+    ipp_job_media_sheets_completed=""
+    eval "${ipp_assignments}"
+
+    if ipp_job_has_hard_error "${ipp_job_state}" "${ipp_job_printer_state_message}" "${ipp_job_state_reasons}"; then
+      echo "ipp_error_timeout (${stage_label}, job=${queue_id}, state=${ipp_job_state:-unknown}, reasons=${ipp_job_state_reasons:-unknown}, message=${ipp_job_printer_state_message:-unknown})"
+      return 1
+    fi
+
+    if ipp_job_is_verified_success "${ipp_job_state}" "${ipp_job_printer_state_message}" "${ipp_job_impressions_completed}" "${ipp_job_media_sheets_completed}"; then
+      return 0
+    fi
+  fi
+
+  completed_block="$(extract_lp_job_block "${queue_id}" "completed" || true)"
+  if [[ -n "${completed_block}" && -z "${ipp_assignments}" ]]; then
+    return 0
+  fi
 
   echo "spool_timeout (${stage_label}, job=${queue_id})"
   return 1
@@ -508,8 +922,13 @@ if [[ -z "$LP_MEDIA_RESOLVED" ]]; then
 fi
 echo "Resolved media: requested='${LP_MEDIA}' -> using='${LP_MEDIA_RESOLVED}'"
 
-# Preferred mode: print source PDFs separately when URLs are present.
-if [[ -n "${packing_url:-}" && -n "${label_url:-}" ]]; then
+if queue_preflight_err="$(printer_queue_hard_error_summary)"; then
+  finish_job "${job_key}" "${claim_id}" "false" "Printer queue not healthy: ${queue_preflight_err}"
+  exit 1
+fi
+
+# Optional legacy mode: print source PDFs separately when URLs are present.
+if [[ "${LP_FORCE_MERGED_JOB}" != "true" && -n "${packing_url:-}" && -n "${label_url:-}" ]]; then
   packing_path="${TMP_DIR}/${safe_job_key}-packing.pdf"
   packing_png_path="${TMP_DIR}/${safe_job_key}-packing.png"
   packing_print_path="${packing_path}"
@@ -609,6 +1028,9 @@ pages="$(detect_pdf_pages "${local_path}")"
 split_enabled="false"
 if [[ "${LP_SPLIT_PAGES}" == "1" || "${LP_SPLIT_PAGES}" == "true" || "${LP_SPLIT_PAGES}" == "yes" ]]; then
   split_enabled="true"
+fi
+if [[ "${LP_FORCE_MERGED_JOB}" == "true" ]]; then
+  echo "Single-job mode enabled; printing merged document as one CUPS job."
 fi
 if [[ "${split_enabled}" == "true" && "${pages}" == "0" ]]; then
   pages="2"

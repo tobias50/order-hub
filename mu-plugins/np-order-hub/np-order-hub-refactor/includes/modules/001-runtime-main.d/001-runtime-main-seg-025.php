@@ -592,13 +592,14 @@ function np_order_hub_order_details_page() {
         (string) $record['order_number'],
         isset($record['payload']) ? $record['payload'] : null
     );
-    if (!empty($record['order_admin_url']) || $packing_url !== '') {
+    $open_order_url = np_order_hub_get_order_admin_url_for_record($record);
+    if ($open_order_url !== '' || $packing_url !== '') {
         echo '<p>';
         if ($packing_url !== '') {
             echo '<a class="button" href="' . esc_url($packing_url) . '" target="_blank" rel="noopener">Packing slip</a> ';
         }
-        if (!empty($record['order_admin_url'])) {
-            echo '<a class="button button-primary" href="' . esc_url($record['order_admin_url']) . '" target="_blank" rel="noopener">Open order in store</a>';
+        if ($open_order_url !== '') {
+            echo '<a class="button button-primary" href="' . esc_url($open_order_url) . '" target="_blank" rel="noopener">Open order in store</a>';
         }
         echo '</p>';
     }
