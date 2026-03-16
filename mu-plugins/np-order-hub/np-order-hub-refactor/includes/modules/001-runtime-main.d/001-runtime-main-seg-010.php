@@ -368,18 +368,6 @@ function np_order_hub_print_queue_finish_claimed_job($job_key, $claim_id, $succe
             $message .= ' CUPS jobs: ' . $cups_summary . '.';
         }
         np_order_hub_print_queue_append_log($job, $message);
-        if ($verification_state === 'needs_review' && function_exists('np_order_hub_send_pushover_message')) {
-            $order_label = isset($job['order_number']) && $job['order_number'] !== '' ? '#' . (string) $job['order_number'] : '#' . (string) ($job['order_id'] ?? '');
-            $store_label = isset($job['store_name']) ? sanitize_text_field((string) $job['store_name']) : '';
-            $alert_message = 'Printjobb må sjekkes manuelt: ' . $order_label;
-            if ($store_label !== '') {
-                $alert_message .= ' ' . $store_label;
-            }
-            if ($verification_note !== '') {
-                $alert_message .= '. ' . $verification_note;
-            }
-            np_order_hub_send_pushover_message(np_order_hub_print_agent_get_alert_title_base() . ' - Print check', $alert_message);
-        }
     } else {
         $job['print_attempts'] = isset($job['print_attempts']) ? ((int) $job['print_attempts'] + 1) : 1;
         $job['print_error'] = sanitize_text_field((string) $error_message);
