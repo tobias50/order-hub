@@ -279,6 +279,7 @@ function np_order_hub_admin_menu() {
     add_submenu_page('np-order-hub', 'Restordre', 'Restordre', $capability, 'np-order-hub-restordre', 'np_order_hub_restordre_page');
     add_submenu_page('np-order-hub', 'Bytte størrelse', 'Bytte størrelse', $capability, 'np-order-hub-bytte-storrelse', 'np_order_hub_bytte_storrelse_page');
 	    add_submenu_page('np-order-hub', 'Ødelagt plagg', 'Ødelagt plagg', $capability, 'np-order-hub-produksjonsfeil', 'np_order_hub_produksjonsfeil_page');
+    add_submenu_page('np-order-hub', 'Print må sjekkes', 'Print må sjekkes', $capability, 'np-order-hub-print-review', 'np_order_hub_print_review_page');
     add_submenu_page('np-order-hub', 'Orders', 'Orders', $capability, 'np-order-hub', 'np_order_hub_orders_page');
     add_submenu_page('np-order-hub', 'Stores', 'Stores', $capability, 'np-order-hub-stores', 'np_order_hub_stores_page');
     add_submenu_page('np-order-hub', 'Varsler', 'Varsler', $capability, 'np-order-hub-notifications', 'np_order_hub_notifications_page');

@@ -1593,6 +1593,162 @@ function np_order_hub_debug_page() {
     echo '</div>';
 }
 
+function np_order_hub_get_print_review_jobs() {
+    $jobs = np_order_hub_print_queue_get_jobs();
+    uasort($jobs, function ($a, $b) {
+        $a_time = isset($a['updated_at_gmt']) ? strtotime((string) $a['updated_at_gmt']) : 0;
+        $b_time = isset($b['updated_at_gmt']) ? strtotime((string) $b['updated_at_gmt']) : 0;
+        if ($a_time === $b_time) {
+            return 0;
+        }
+        return $a_time > $b_time ? -1 : 1;
+    });
+
+    $review_jobs = array();
+    foreach ($jobs as $job_key => $job) {
+        if (!is_array($job)) {
+            continue;
+        }
+        if (!np_order_hub_print_queue_job_needs_review($job)) {
+            continue;
+        }
+        $review_jobs[$job_key] = $job;
+    }
+
+    return $review_jobs;
+}
+
+function np_order_hub_print_review_page() {
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
+    $queue_notice = null;
+    if (!empty($_POST['np_order_hub_print_queue_action'])) {
+        check_admin_referer('np_order_hub_debug_print_queue');
+        $action = sanitize_key((string) $_POST['np_order_hub_print_queue_action']);
+        if ($action === 'retry_job') {
+            $job_key = sanitize_text_field((string) ($_POST['np_order_hub_print_job_key'] ?? ''));
+            $retry = np_order_hub_print_queue_retry_now($job_key);
+            if (is_wp_error($retry)) {
+                $queue_notice = array(
+                    'type' => 'error',
+                    'message' => $retry->get_error_message(),
+                );
+            } else {
+                $queue_notice = array(
+                    'type' => 'updated',
+                    'message' => 'Print job queued for retry.',
+                );
+            }
+        } elseif ($action === 'confirm_print') {
+            $job_key = sanitize_text_field((string) ($_POST['np_order_hub_print_job_key'] ?? ''));
+            $confirmed = np_order_hub_print_queue_mark_manually_confirmed($job_key);
+            if (is_wp_error($confirmed)) {
+                $queue_notice = array(
+                    'type' => 'error',
+                    'message' => $confirmed->get_error_message(),
+                );
+            } else {
+                $queue_notice = array(
+                    'type' => 'updated',
+                    'message' => 'Print job manually confirmed.',
+                );
+            }
+        }
+    }
+
+    $review_jobs = np_order_hub_get_print_review_jobs();
+
+    echo '<div class="wrap">';
+    echo '<h1>Print må sjekkes</h1>';
+    echo '<p>Denne køen viser bare jobber som fortsatt trenger manuell oppfølging.</p>';
+
+    if (is_array($queue_notice) && !empty($queue_notice['message'])) {
+        $notice_class = $queue_notice['type'] === 'error' ? 'notice notice-error' : 'notice notice-success';
+        echo '<div class="' . esc_attr($notice_class) . '"><p>' . esc_html((string) $queue_notice['message']) . '</p></div>';
+    }
+
+    if (empty($review_jobs)) {
+        echo '<div class="notice notice-success inline"><p>Ingen printjobber trenger manuell sjekk nå.</p></div>';
+        echo '</div>';
+        return;
+    }
+
+    echo '<p><strong>Antall jobber:</strong> ' . esc_html((string) count($review_jobs)) . '</p>';
+    echo '<table class="widefat striped">';
+    echo '<thead><tr>';
+    echo '<th>Order</th>';
+    echo '<th>Store</th>';
+    echo '<th>Status</th>';
+    echo '<th>Print check</th>';
+    echo '<th>Updated</th>';
+    echo '<th>Document</th>';
+    echo '<th>Last error</th>';
+    echo '<th>Actions</th>';
+    echo '</tr></thead><tbody>';
+
+    foreach ($review_jobs as $job_key => $job) {
+        $order_id = isset($job['order_id']) ? (int) $job['order_id'] : 0;
+        $order_number = isset($job['order_number']) ? (string) $job['order_number'] : '';
+        $record_id = isset($job['record_id']) ? (int) $job['record_id'] : 0;
+        $order_label = $order_number !== '' ? ('#' . $order_number) : ('#' . $order_id);
+        if ($record_id > 0) {
+            $details_url = admin_url('admin.php?page=np-order-hub-details&record_id=' . $record_id);
+            $order_label = '<a href="' . esc_url($details_url) . '">' . esc_html($order_label) . '</a>';
+        } else {
+            $order_label = esc_html($order_label);
+        }
+
+        $store_name = isset($job['store_name']) && $job['store_name'] !== '' ? (string) $job['store_name'] : (isset($job['store_key']) ? (string) $job['store_key'] : '');
+        $status = isset($job['status']) ? (string) $job['status'] : 'pending';
+        $updated = isset($job['updated_at_gmt']) ? (string) $job['updated_at_gmt'] : '';
+        $document_url = isset($job['document_url']) ? (string) $job['document_url'] : '';
+        $document_name = isset($job['document_filename']) ? (string) $job['document_filename'] : 'PDF';
+        $last_error = isset($job['last_error']) ? (string) $job['last_error'] : '';
+        $logs = isset($job['log']) && is_array($job['log']) ? $job['log'] : array();
+        $verification = np_order_hub_print_queue_get_verification_summary($job);
+
+        echo '<tr>';
+        echo '<td>' . $order_label . '</td>';
+        echo '<td>' . esc_html($store_name) . '</td>';
+        echo '<td>' . esc_html($status) . '</td>';
+        echo '<td>' . esc_html((string) ($verification['label'] ?? '—'));
+        if (!empty($verification['detail'])) {
+            echo '<br /><span style="color:#646970;">' . esc_html((string) $verification['detail']) . '</span>';
+        }
+        echo '</td>';
+        echo '<td>' . esc_html($updated !== '' ? get_date_from_gmt($updated, 'd.m.y H:i:s') : '—') . '</td>';
+        if ($document_url !== '') {
+            echo '<td><a href="' . esc_url($document_url) . '" target="_blank" rel="noopener">' . esc_html($document_name) . '</a></td>';
+        } else {
+            echo '<td>—</td>';
+        }
+        echo '<td>' . esc_html($last_error !== '' ? $last_error : '—') . '</td>';
+        echo '<td>';
+        echo '<form method="post" style="display:inline; margin-right:6px;">';
+        wp_nonce_field('np_order_hub_debug_print_queue');
+        echo '<input type="hidden" name="np_order_hub_print_queue_action" value="confirm_print" />';
+        echo '<input type="hidden" name="np_order_hub_print_job_key" value="' . esc_attr((string) $job_key) . '" />';
+        echo '<button class="button button-small" type="submit">Bekreft print</button>';
+        echo '</form>';
+        echo '<form method="post" style="display:inline;">';
+        wp_nonce_field('np_order_hub_debug_print_queue');
+        echo '<input type="hidden" name="np_order_hub_print_queue_action" value="retry_job" />';
+        echo '<input type="hidden" name="np_order_hub_print_job_key" value="' . esc_attr((string) $job_key) . '" />';
+        echo '<button class="button button-small" type="submit">Retry now</button>';
+        echo '</form>';
+        if (!empty($logs)) {
+            echo '<details style="margin-top:6px;"><summary>Log</summary><pre style="white-space:pre-wrap; max-width:480px;">' . esc_html(implode("\n", $logs)) . '</pre></details>';
+        }
+        echo '</td>';
+        echo '</tr>';
+    }
+
+    echo '</tbody></table>';
+    echo '</div>';
+}
+
 function np_order_hub_discover_store_site_url($url) {
     $base_url = np_order_hub_build_site_base_url($url);
     if ($base_url === '') {
