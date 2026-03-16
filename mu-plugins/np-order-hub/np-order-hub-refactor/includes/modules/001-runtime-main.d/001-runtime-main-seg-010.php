@@ -339,6 +339,9 @@ function np_order_hub_print_queue_finish_claimed_job($job_key, $claim_id, $succe
     $verification_state = isset($print_meta['verification_state']) ? sanitize_key((string) $print_meta['verification_state']) : '';
     $verification_note = isset($print_meta['verification_note']) ? sanitize_text_field((string) $print_meta['verification_note']) : '';
     $verified_at_gmt = isset($print_meta['verified_at_gmt']) ? sanitize_text_field((string) $print_meta['verified_at_gmt']) : '';
+    $has_failure_signal = !empty($print_meta['hard_failure'])
+        || !empty($print_meta['failure_stage'])
+        || !empty($print_meta['failure_code']);
 
     if ($success) {
         $job['status'] = 'completed';
@@ -346,7 +349,24 @@ function np_order_hub_print_queue_finish_claimed_job($job_key, $claim_id, $succe
         $job['print_error'] = '';
         $job['last_error'] = '';
         if ($verification_state === '') {
-            $verification_state = !empty($print_meta) ? 'needs_review' : '';
+            if (!empty($print_meta) && !$has_failure_signal) {
+                $verification_state = 'verified';
+                if ($verified_at_gmt === '') {
+                    $verified_at_gmt = $job['completed_at_gmt'];
+                }
+                if ($verification_note === '') {
+                    $verification_note = 'Agent reported successful print.';
+                }
+                if (empty($print_meta['verification_method'])) {
+                    $print_meta['verification_method'] = 'agent_success';
+                }
+                $print_meta['verification_state'] = 'verified';
+                $print_meta['verified_at_gmt'] = $verified_at_gmt;
+                $print_meta['verification_note'] = $verification_note;
+                $job['last_print_meta'] = $print_meta;
+            } elseif (!empty($print_meta)) {
+                $verification_state = 'needs_review';
+            }
         }
         if ($verification_state !== '') {
             $job['print_verification_status'] = $verification_state;
