@@ -20,12 +20,20 @@ if (!defined('NP_ORDER_HUB_STATUS_SYNC_LIMIT')) {
 if (!defined('NP_ORDER_HUB_STATUS_SYNC_CURSOR_OPTION')) {
     define('NP_ORDER_HUB_STATUS_SYNC_CURSOR_OPTION', 'np_order_hub_status_sync_cursor');
 }
+if (!defined('NP_ORDER_HUB_PROCESSING_BACKFILL_EVENT')) {
+    define('NP_ORDER_HUB_PROCESSING_BACKFILL_EVENT', 'np_order_hub_backfill_processing_orders_cron');
+}
+if (!defined('NP_ORDER_HUB_PROCESSING_BACKFILL_MAX_PER_STORE')) {
+    define('NP_ORDER_HUB_PROCESSING_BACKFILL_MAX_PER_STORE', 100);
+}
 
 add_filter('cron_schedules', 'np_order_hub_deleted_sync_cron_schedules');
 add_action('init', 'np_order_hub_deleted_sync_schedule_event');
 add_action(NP_ORDER_HUB_DELETED_SYNC_EVENT, 'np_order_hub_deleted_sync_run_cron');
 add_action('init', 'np_order_hub_status_sync_schedule_event');
 add_action(NP_ORDER_HUB_STATUS_SYNC_EVENT, 'np_order_hub_status_sync_run_cron');
+add_action('init', 'np_order_hub_processing_backfill_schedule_event');
+add_action(NP_ORDER_HUB_PROCESSING_BACKFILL_EVENT, 'np_order_hub_processing_backfill_run_cron');
 
 function np_order_hub_deleted_sync_cron_schedules($schedules) {
     if (!is_array($schedules)) {
@@ -64,6 +72,19 @@ function np_order_hub_status_sync_schedule_event() {
 
 function np_order_hub_status_sync_run_cron() {
     np_order_hub_sync_order_statuses(NP_ORDER_HUB_STATUS_SYNC_LIMIT);
+}
+
+function np_order_hub_processing_backfill_schedule_event() {
+    if (!function_exists('wp_next_scheduled') || !function_exists('wp_schedule_event')) {
+        return;
+    }
+    if (!wp_next_scheduled(NP_ORDER_HUB_PROCESSING_BACKFILL_EVENT)) {
+        wp_schedule_event(time() + 240, 'np_order_hub_5min', NP_ORDER_HUB_PROCESSING_BACKFILL_EVENT);
+    }
+}
+
+function np_order_hub_processing_backfill_run_cron() {
+    np_order_hub_backfill_processing_orders('', NP_ORDER_HUB_PROCESSING_BACKFILL_MAX_PER_STORE);
 }
 
 function np_order_hub_wc_response_indicates_missing_order($status_code, $body) {
@@ -1735,9 +1756,11 @@ function np_order_hub_stores_page() {
 
     if (!empty($_POST['np_order_hub_add_store'])) {
         check_admin_referer('np_order_hub_add_store');
-        $key = sanitize_key((string) $_POST['store_key']);
         $name = sanitize_text_field((string) $_POST['store_name']);
         $url = esc_url_raw((string) $_POST['store_url']);
+        $recommended_key = $url !== '' ? np_order_hub_auto_store_key_from_url($url) : '';
+        $submitted_key = sanitize_key((string) ($_POST['store_key'] ?? ''));
+        $key = $recommended_key !== '' ? $recommended_key : $submitted_key;
         $secret = trim((string) $_POST['store_secret']);
         $token = sanitize_text_field((string) $_POST['store_token']);
         $consumer_key = sanitize_text_field((string) ($_POST['store_consumer_key'] ?? ''));
@@ -1779,6 +1802,9 @@ function np_order_hub_stores_page() {
             echo '<div class="error"><p>' . esc_html($upsert->get_error_message()) . '</p></div>';
         } else {
             $stores = np_order_hub_get_stores();
+            if ($recommended_key !== '' && $submitted_key !== '' && $submitted_key !== $recommended_key) {
+                echo '<div class="notice notice-warning"><p>Store key was normalized from URL to <code>' . esc_html($recommended_key) . '</code>.</p></div>';
+            }
             $sync_result = np_order_hub_push_shipping_config_to_store($upsert);
             if (is_wp_error($sync_result)) {
                 echo '<div class="notice notice-warning"><p>Store saved, men fraktvindu ble ikke synket: ' . esc_html($sync_result->get_error_message()) . '</p></div>';
@@ -1967,7 +1993,7 @@ function np_order_hub_stores_page() {
     echo '<table class="form-table">';
     echo '<tr><th scope="row"><label for="store_key">Store Key</label></th>';
     echo '<td><input name="store_key" id="store_key" type="text" class="regular-text" value="' . esc_attr($store_key_value) . '"' . ($editing ? ' readonly' : '') . ' required />';
-    echo $editing ? ' <p class="description">Store key cannot be changed.</p>' : ' <p class="description">Short ID like butikk1.</p>';
+    echo $editing ? ' <p class="description">Store key cannot be changed.</p>' : ' <p class="description">On new stores, this is auto-generated from the domain, for example <code>nydalenvgs_nordicprofil_no</code>.</p>';
     echo '</td></tr>';
     echo '<tr><th scope="row"><label for="store_name">Store Name</label></th>';
     echo '<td><input name="store_name" id="store_name" type="text" class="regular-text" value="' . esc_attr($store_name_value) . '" required /></td></tr>';
