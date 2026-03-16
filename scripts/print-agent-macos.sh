@@ -194,6 +194,123 @@ acquire_run_lock() {
 
 acquire_run_lock
 
+PRINT_META_CURRENT_MODE=""
+PRINT_META_VERIFICATION_STATE=""
+PRINT_META_VERIFICATION_METHOD=""
+PRINT_META_VERIFICATION_NOTE=""
+PRINT_META_VERIFIED_AT_GMT=""
+PRINT_META_CUPS_JOB_MAP=""
+PRINT_META_CUPS_JOB_IDS=""
+PRINT_META_FAILURE_STAGE=""
+PRINT_META_FAILURE_CODE=""
+PRINT_META_HARD_FAILURE="false"
+
+slugify_stage() {
+  local value="$1"
+  value="$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]' | tr ' /' '__' | tr -cd 'a-z0-9_-')"
+  if [[ -z "${value}" ]]; then
+    value="job"
+  fi
+  printf '%s' "${value}"
+}
+
+append_unique_csv() {
+  local existing="$1"
+  local value="$2"
+  if [[ -z "${value}" ]]; then
+    printf '%s' "${existing}"
+    return 0
+  fi
+  if [[ -z "${existing}" ]]; then
+    printf '%s' "${value}"
+    return 0
+  fi
+  local part
+  IFS=',' read -r -a parts <<<"${existing}"
+  for part in "${parts[@]}"; do
+    if [[ "${part}" == "${value}" ]]; then
+      printf '%s' "${existing}"
+      return 0
+    fi
+  done
+  printf '%s,%s' "${existing}" "${value}"
+}
+
+append_note_unique() {
+  local existing="$1"
+  local value="$2"
+  if [[ -z "${value}" ]]; then
+    printf '%s' "${existing}"
+    return 0
+  fi
+  if [[ -z "${existing}" ]]; then
+    printf '%s' "${value}"
+    return 0
+  fi
+  if [[ "${existing}" == *"${value}"* ]]; then
+    printf '%s' "${existing}"
+    return 0
+  fi
+  printf '%s; %s' "${existing}" "${value}"
+}
+
+record_cups_job() {
+  local stage_label="$1"
+  local job_id="$2"
+  local stage_slug
+  stage_slug="$(slugify_stage "${stage_label}")"
+  if [[ -z "${job_id}" ]]; then
+    return 0
+  fi
+  if [[ -z "${PRINT_META_CUPS_JOB_MAP}" ]]; then
+    PRINT_META_CUPS_JOB_MAP="${stage_slug}::${job_id}"
+  else
+    case "||${PRINT_META_CUPS_JOB_MAP}||" in
+      *"||${stage_slug}::${job_id}||"*) ;;
+      *) PRINT_META_CUPS_JOB_MAP="${PRINT_META_CUPS_JOB_MAP}||${stage_slug}::${job_id}" ;;
+    esac
+  fi
+  PRINT_META_CUPS_JOB_IDS="$(append_unique_csv "${PRINT_META_CUPS_JOB_IDS}" "${job_id}")"
+}
+
+set_print_verified() {
+  local method="$1"
+  local note="${2:-}"
+  if [[ "${PRINT_META_VERIFICATION_STATE}" != "needs_review" ]]; then
+    PRINT_META_VERIFICATION_STATE="verified"
+  fi
+  if [[ -n "${method}" ]]; then
+    PRINT_META_VERIFICATION_METHOD="${method}"
+  fi
+  PRINT_META_VERIFIED_AT_GMT="$(date -u '+%Y-%m-%d %H:%M:%S')"
+  if [[ -n "${note}" ]]; then
+    PRINT_META_VERIFICATION_NOTE="$(append_note_unique "${PRINT_META_VERIFICATION_NOTE}" "${note}")"
+  fi
+}
+
+set_print_needs_review() {
+  local note="$1"
+  if [[ "${PRINT_META_VERIFICATION_STATE}" == "" || "${PRINT_META_VERIFICATION_STATE}" == "verified" ]]; then
+    PRINT_META_VERIFICATION_STATE="needs_review"
+  fi
+  if [[ -n "${note}" ]]; then
+    PRINT_META_VERIFICATION_NOTE="$(append_note_unique "${PRINT_META_VERIFICATION_NOTE}" "${note}")"
+  fi
+}
+
+set_print_failure_meta() {
+  local stage_label="$1"
+  local failure_code="$2"
+  local hard_failure="${3:-true}"
+  PRINT_META_FAILURE_STAGE="$(slugify_stage "${stage_label}")"
+  PRINT_META_FAILURE_CODE="${failure_code}"
+  if [[ "${hard_failure}" == "true" ]]; then
+    PRINT_META_HARD_FAILURE="true"
+  else
+    PRINT_META_HARD_FAILURE="false"
+  fi
+}
+
 build_json() {
   /usr/bin/python3 - "$@" <<'PY'
 import json
@@ -215,19 +332,87 @@ print(json.dumps(obj))
 PY
 }
 
+build_finish_payload_json() {
+  local job_key="$1"
+  local claim_id="$2"
+  local success="$3"
+  local error_message="${4:-}"
+
+  /usr/bin/python3 - \
+    "$job_key" \
+    "$claim_id" \
+    "$success" \
+    "$error_message" \
+    "$AGENT_NAME" \
+    "$PRINT_META_CURRENT_MODE" \
+    "$PRINT_META_CUPS_JOB_IDS" \
+    "$PRINT_META_CUPS_JOB_MAP" \
+    "$PRINT_META_FAILURE_STAGE" \
+    "$PRINT_META_FAILURE_CODE" \
+    "$PRINT_META_HARD_FAILURE" \
+    "$PRINT_META_VERIFIED_AT_GMT" \
+    "$PRINT_META_VERIFICATION_STATE" \
+    "$PRINT_META_VERIFICATION_METHOD" \
+    "$PRINT_META_VERIFICATION_NOTE" <<'PY'
+import json
+import sys
+
+(
+    job_key,
+    claim_id,
+    success_raw,
+    error_message,
+    agent_name,
+    mode,
+    cups_job_ids,
+    cups_job_map,
+    failure_stage,
+    failure_code,
+    hard_failure_raw,
+    verified_at_gmt,
+    verification_state,
+    verification_method,
+    verification_note,
+) = sys.argv[1:16]
+
+payload = {
+    "job_key": job_key,
+    "claim_id": claim_id,
+    "success": success_raw.lower() == "true",
+    "error": error_message,
+    "agent": agent_name,
+}
+
+print_meta = {
+    "agent_name": agent_name,
+    "mode": mode,
+    "cups_job_ids": cups_job_ids,
+    "cups_job_map": cups_job_map,
+    "failure_stage": failure_stage,
+    "failure_code": failure_code,
+    "hard_failure": hard_failure_raw.lower() == "true",
+    "verified_at_gmt": verified_at_gmt,
+    "verification_state": verification_state,
+    "verification_method": verification_method,
+    "verification_note": verification_note,
+}
+print_meta = {k: v for k, v in print_meta.items() if not (isinstance(v, str) and v == "")}
+if print_meta:
+    payload["print_meta"] = print_meta
+
+print(json.dumps(payload))
+PY
+}
+
 finish_job() {
   local job_key="$1"
   local claim_id="$2"
   local success="$3"
   local error_message="${4:-}"
-  local success_marker="__BOOL_FALSE__"
   local attempt
-  if [[ "${success}" == "true" ]]; then
-    success_marker="__BOOL_TRUE__"
-  fi
 
   local payload
-  payload="$(build_json "job_key=${job_key}" "claim_id=${claim_id}" "success=${success_marker}" "error=${error_message}")"
+  payload="$(build_finish_payload_json "${job_key}" "${claim_id}" "${success}" "${error_message}")"
 
   for ((attempt=1; attempt<=HTTP_RETRY_ATTEMPTS; attempt++)); do
     if curl -sS --connect-timeout 10 --max-time "${CURL_TIMEOUT_SECONDS}" -X POST "${FINISH_URL}" -H "X-NP-Print-Token: ${PRINT_TOKEN}" -H "Content-Type: application/json" --data "${payload}" >/dev/null; then
@@ -804,8 +989,13 @@ verify_lp_submission() {
   job_id="$(extract_lp_job_id "${lp_output}")"
   if [[ -z "${job_id}" ]]; then
     # If we cannot parse job-id, accept lp success as best-effort fallback.
+    set_print_needs_review "Kunne ikke lese CUPS job-id for ${stage_label}."
     return 0
   fi
+
+  local stage_slug
+  stage_slug="$(slugify_stage "${stage_label}")"
+  record_cups_job "${stage_label}" "${job_id}"
 
   local queue_id="${PRINTER_NAME}-${job_id}"
   local end_ts
@@ -824,11 +1014,13 @@ verify_lp_submission() {
   while [[ $(date +%s) -le ${end_ts} ]]; do
     # If printer queue is disabled, treat as print failure.
     if lpstat -p "${PRINTER_NAME}" 2>/dev/null | grep -qi 'disabled'; then
+      set_print_failure_meta "${stage_label}" "printer_disabled" "true"
       echo "printer_disabled (${stage_label})"
       return 1
     fi
 
     if log_summary="$(lp_job_error_log_summary "${job_id}")"; then
+      set_print_failure_meta "${stage_label}" "spool_error_log" "true"
       echo "spool_error_log (${stage_label}, job=${queue_id}, ${log_summary})"
       return 1
     fi
@@ -836,6 +1028,7 @@ verify_lp_submission() {
     job_block="$(extract_lp_job_block "${queue_id}" "all" || true)"
     if [[ -n "${job_block}" ]] && lp_job_has_hard_error "${job_block}"; then
       status_summary="$(lp_job_status_summary "${job_block}")"
+      set_print_failure_meta "${stage_label}" "spool_error" "true"
       echo "spool_error (${stage_label}, job=${queue_id}, ${status_summary})"
       return 1
     fi
@@ -850,11 +1043,13 @@ verify_lp_submission() {
       eval "${ipp_assignments}"
 
       if ipp_job_has_hard_error "${ipp_job_state}" "${ipp_job_printer_state_message}" "${ipp_job_state_reasons}"; then
+        set_print_failure_meta "${stage_label}" "ipp_error" "true"
         echo "ipp_error (${stage_label}, job=${queue_id}, state=${ipp_job_state:-unknown}, reasons=${ipp_job_state_reasons:-unknown}, message=${ipp_job_printer_state_message:-unknown})"
         return 1
       fi
 
       if ipp_job_is_verified_success "${ipp_job_state}" "${ipp_job_printer_state_message}" "${ipp_job_impressions_completed}" "${ipp_job_media_sheets_completed}"; then
+        set_print_verified "ipp_completed" "${stage_slug}:${job_id}"
         return 0
       fi
     fi
@@ -862,6 +1057,7 @@ verify_lp_submission() {
     completed_block="$(extract_lp_job_block "${queue_id}" "completed" || true)"
     if [[ -n "${completed_block}" ]] && lp_job_has_hard_error "${completed_block}"; then
       status_summary="$(lp_job_status_summary "${completed_block}")"
+      set_print_failure_meta "${stage_label}" "completed_with_error" "true"
       echo "completed_with_error (${stage_label}, job=${queue_id}, ${status_summary})"
       return 1
     fi
@@ -870,6 +1066,7 @@ verify_lp_submission() {
     # job is still visible in CUPS history. This avoids false positives when a job disappears
     # from the active queue before CUPS has finalized its terminal state.
     if [[ -n "${completed_block}" && -z "${ipp_assignments}" ]]; then
+      set_print_verified "cups_completed_history" "${stage_slug}:${job_id}"
       return 0
     fi
 
@@ -877,6 +1074,7 @@ verify_lp_submission() {
   done
 
   if log_summary="$(lp_job_error_log_summary "${job_id}")"; then
+    set_print_failure_meta "${stage_label}" "spool_error_log_timeout" "true"
     echo "spool_error_log_timeout (${stage_label}, job=${queue_id}, ${log_summary})"
     return 1
   fi
@@ -884,6 +1082,7 @@ verify_lp_submission() {
   job_block="$(extract_lp_job_block "${queue_id}" "all" || true)"
   if [[ -n "${job_block}" ]] && lp_job_has_hard_error "${job_block}"; then
     status_summary="$(lp_job_status_summary "${job_block}")"
+    set_print_failure_meta "${stage_label}" "spool_error_timeout" "true"
     echo "spool_error_timeout (${stage_label}, job=${queue_id}, ${status_summary})"
     return 1
   fi
@@ -898,20 +1097,24 @@ verify_lp_submission() {
     eval "${ipp_assignments}"
 
     if ipp_job_has_hard_error "${ipp_job_state}" "${ipp_job_printer_state_message}" "${ipp_job_state_reasons}"; then
+      set_print_failure_meta "${stage_label}" "ipp_error_timeout" "true"
       echo "ipp_error_timeout (${stage_label}, job=${queue_id}, state=${ipp_job_state:-unknown}, reasons=${ipp_job_state_reasons:-unknown}, message=${ipp_job_printer_state_message:-unknown})"
       return 1
     fi
 
     if ipp_job_is_verified_success "${ipp_job_state}" "${ipp_job_printer_state_message}" "${ipp_job_impressions_completed}" "${ipp_job_media_sheets_completed}"; then
+      set_print_verified "ipp_completed" "${stage_slug}:${job_id}"
       return 0
     fi
   fi
 
   completed_block="$(extract_lp_job_block "${queue_id}" "completed" || true)"
   if [[ -n "${completed_block}" && -z "${ipp_assignments}" ]]; then
+    set_print_verified "cups_completed_history" "${stage_slug}:${job_id}"
     return 0
   fi
 
+  set_print_failure_meta "${stage_label}" "spool_timeout" "true"
   echo "spool_timeout (${stage_label}, job=${queue_id})"
   return 1
 }
@@ -929,6 +1132,7 @@ fi
 
 # Optional legacy mode: print source PDFs separately when URLs are present.
 if [[ "${LP_FORCE_MERGED_JOB}" != "true" && -n "${packing_url:-}" && -n "${label_url:-}" ]]; then
+  PRINT_META_CURRENT_MODE="direct"
   packing_path="${TMP_DIR}/${safe_job_key}-packing.pdf"
   packing_png_path="${TMP_DIR}/${safe_job_key}-packing.png"
   packing_print_path="${packing_path}"
@@ -1017,6 +1221,7 @@ if [[ "${LP_FORCE_MERGED_JOB}" != "true" && -n "${packing_url:-}" && -n "${label
 fi
 
 local_path="${TMP_DIR}/${document_filename}"
+PRINT_META_CURRENT_MODE="merged"
 echo "Claimed job: ${job_key} (order ${order_id}), downloading merged document..."
 if ! download_pdf "${document_url}" "${local_path}" "Merged document"; then
   finish_job "${job_key}" "${claim_id}" "false" "Failed to download merged document."
@@ -1038,6 +1243,7 @@ if [[ "${split_enabled}" == "true" && "${pages}" == "0" ]]; then
 fi
 
 if [[ "${split_enabled}" == "true" && "${pages}" =~ ^[0-9]+$ && "${pages}" -ge 2 ]]; then
+  PRINT_META_CURRENT_MODE="split"
   if ! lp_out_1="$(run_lp "${local_path}" "1")"; then
     lp_exit=$?
     if [[ "${lp_exit}" -eq 142 || "${lp_exit}" -eq 124 ]]; then
