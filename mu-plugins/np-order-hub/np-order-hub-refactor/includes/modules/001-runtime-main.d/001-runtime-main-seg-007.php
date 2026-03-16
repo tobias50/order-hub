@@ -471,6 +471,15 @@ function np_order_hub_print_queue_get_order_record($store_key, $order_id) {
     return is_array($row) ? $row : null;
 }
 
+function np_order_hub_print_queue_get_allowed_statuses() {
+    return array(
+        'processing',
+        'reklamasjon',
+        'restordre',
+        'bytte-storrelse',
+    );
+}
+
 function np_order_hub_print_queue_should_enqueue($store, $record, $payload = array()) {
     if (!is_array($store) || !is_array($record)) {
         return false;
@@ -486,7 +495,7 @@ function np_order_hub_print_queue_should_enqueue($store, $record, $payload = arr
         return false;
     }
     $status = isset($record['status']) ? sanitize_key((string) $record['status']) : '';
-    if ($status !== 'processing') {
+    if (!in_array($status, np_order_hub_print_queue_get_allowed_statuses(), true)) {
         return false;
     }
     $bucket = np_order_hub_extract_delivery_bucket_from_payload_data($payload);
