@@ -41,7 +41,7 @@ add_action('init', 'np_order_hub_wpo_register_reklamasjon_status');
 add_filter('wc_order_statuses', 'np_order_hub_wpo_add_reklamasjon_status', 20, 1);
 add_action('init', 'np_order_hub_wpo_register_restordre_status');
 add_filter('wc_order_statuses', 'np_order_hub_wpo_add_restordre_status', 20, 1);
-add_action('woocommerce_order_status_changed', 'np_order_hub_wpo_mark_restordre_for_hub', 10, 4);
+add_action('woocommerce_order_status_changed', 'np_order_hub_wpo_mark_special_order_for_hub', 10, 4);
 add_filter('wc_order_is_editable', 'np_order_hub_wpo_order_is_editable', 10, 2);
 
 $np_order_hub_wpo_main_file = defined('NP_ORDER_HUB_WPO_MAIN_FILE') ? NP_ORDER_HUB_WPO_MAIN_FILE : __FILE__;
@@ -166,8 +166,9 @@ function np_order_hub_wpo_add_restordre_status($statuses) {
     return $new_statuses;
 }
 
-function np_order_hub_wpo_mark_restordre_for_hub($order_id, $old_status, $new_status, $order = null) {
-    if ($new_status !== 'restordre') {
+function np_order_hub_wpo_mark_special_order_for_hub($order_id, $old_status, $new_status, $order = null) {
+    $new_status = sanitize_key((string) $new_status);
+    if (!in_array($new_status, array('reklamasjon', 'restordre', 'bytte-storrelse'), true)) {
         return;
     }
     if (!$order && function_exists('wc_get_order')) {

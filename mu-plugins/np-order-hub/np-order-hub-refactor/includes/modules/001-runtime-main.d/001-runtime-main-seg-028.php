@@ -612,7 +612,16 @@ function np_order_hub_fetch_remote_order_state($store, $order_id, $timeout = 12)
     ));
 }
 
-function np_order_hub_fetch_processing_orders_page($store, $per_page, $page) {
+function np_order_hub_get_print_backfill_statuses() {
+    return array(
+        'processing',
+        'reklamasjon',
+        'restordre',
+        'bytte-storrelse',
+    );
+}
+
+function np_order_hub_fetch_processing_orders_page($store, $per_page, $page, $status = 'processing') {
     $per_page = absint($per_page);
     if ($per_page < 1) {
         $per_page = 100;
@@ -623,9 +632,13 @@ function np_order_hub_fetch_processing_orders_page($store, $per_page, $page) {
     if ($page < 1) {
         $page = 1;
     }
+    $status = sanitize_key((string) $status);
+    if ($status === '') {
+        $status = 'processing';
+    }
 
     $params = array(
-        'status' => 'processing',
+        'status' => $status,
         'orderby' => 'date',
         'order' => 'desc',
         'per_page' => $per_page,
@@ -673,7 +686,7 @@ function np_order_hub_fetch_processing_orders_page($store, $per_page, $page) {
 
     $url = add_query_arg(array(
         'token' => $token,
-        'status' => 'processing',
+        'status' => $status,
         'per_page' => $per_page,
         'page' => $page,
     ), $endpoint);
@@ -748,6 +761,7 @@ function np_order_hub_backfill_processing_orders($store_filter = '', $max_per_st
 
     $stats = array(
         'stores' => 0,
+        'statuses' => 0,
         'checked' => 0,
         'inserted' => 0,
         'updated' => 0,
@@ -755,6 +769,7 @@ function np_order_hub_backfill_processing_orders($store_filter = '', $max_per_st
         'source_wc' => 0,
         'source_token' => 0,
     );
+    $allowed_statuses = np_order_hub_get_print_backfill_statuses();
 
     foreach ($stores as $store_key => $store) {
         if (!is_array($store)) {
@@ -769,132 +784,138 @@ function np_order_hub_backfill_processing_orders($store_filter = '', $max_per_st
         }
         $processed_for_store = 0;
 
-        for ($page = 1; $page <= $max_pages; $page++) {
-            $page_result = np_order_hub_fetch_processing_orders_page($store, $per_page, $page);
-            if (is_wp_error($page_result)) {
-                $stats['errors']++;
-                break;
-            }
-
-            $orders = isset($page_result['orders']) && is_array($page_result['orders']) ? $page_result['orders'] : array();
-            $source = isset($page_result['source']) ? (string) $page_result['source'] : '';
-            if ($source === 'wc') {
-                $stats['source_wc']++;
-            } elseif ($source === 'token') {
-                $stats['source_token']++;
-            }
-            if (empty($orders)) {
-                break;
-            }
-
-            foreach ($orders as $data) {
-                if (!is_array($data)) {
-                    continue;
-                }
-                $order_id = absint($data['id'] ?? 0);
-                if ($order_id < 1) {
-                    continue;
-                }
-                $status = sanitize_key((string) ($data['status'] ?? ''));
-                if ($status !== 'processing') {
-                    continue;
+        foreach ($allowed_statuses as $target_status) {
+            $stats['statuses']++;
+            for ($page = 1; $page <= $max_pages; $page++) {
+                $page_result = np_order_hub_fetch_processing_orders_page($store, $per_page, $page, $target_status);
+                if (is_wp_error($page_result)) {
+                    $stats['errors']++;
+                    break;
                 }
 
-                if ($processed_for_store >= $max_per_store) {
-                    break 2;
+                $orders = isset($page_result['orders']) && is_array($page_result['orders']) ? $page_result['orders'] : array();
+                $source = isset($page_result['source']) ? (string) $page_result['source'] : '';
+                if ($source === 'wc') {
+                    $stats['source_wc']++;
+                } elseif ($source === 'token') {
+                    $stats['source_token']++;
                 }
-                $processed_for_store++;
-                $stats['checked']++;
-
-                $order_number = isset($data['number']) ? sanitize_text_field((string) $data['number']) : (string) $order_id;
-                $currency = isset($data['currency']) ? sanitize_text_field((string) $data['currency']) : '';
-                $total = np_order_hub_parse_numeric_value($data['total'] ?? 0);
-                if ($total === null) {
-                    $total = 0.0;
+                if (empty($orders)) {
+                    break;
                 }
 
-                $date_created_gmt = np_order_hub_parse_datetime_gmt(
-                    $data['date_created_gmt'] ?? '',
-                    $data['date_created'] ?? ''
-                );
-                $date_modified_gmt = np_order_hub_parse_datetime_gmt(
-                    $data['date_modified_gmt'] ?? '',
-                    $data['date_modified'] ?? ''
-                );
-
-                $existing = $wpdb->get_row(
-                    $wpdb->prepare(
-                        "SELECT id, payload FROM $table WHERE store_key = %s AND order_id = %d",
-                        $store_key,
-                        $order_id
-                    ),
-                    ARRAY_A
-                );
-                $existing_id = $existing ? (int) $existing['id'] : 0;
-                $existing_bucket = $existing ? np_order_hub_extract_delivery_bucket_from_payload_data($existing['payload']) : '';
-                $existing_payload = array();
-                if ($existing && !empty($existing['payload'])) {
-                    $decoded_existing_payload = json_decode((string) $existing['payload'], true);
-                    if (is_array($decoded_existing_payload)) {
-                        $existing_payload = $decoded_existing_payload;
+                foreach ($orders as $data) {
+                    if (!is_array($data)) {
+                        continue;
                     }
-                }
+                    $order_id = absint($data['id'] ?? 0);
+                    if ($order_id < 1) {
+                        continue;
+                    }
+                    $status = sanitize_key((string) ($data['status'] ?? ''));
+                    if (!in_array($status, $allowed_statuses, true)) {
+                        continue;
+                    }
 
-                $store_bucket = np_order_hub_get_active_store_delivery_bucket($store);
-                $bucket_to_set = $existing_bucket !== '' ? $existing_bucket : $store_bucket;
-                $data[NP_ORDER_HUB_DELIVERY_BUCKET_KEY] = $bucket_to_set;
-                if (!empty($existing_payload['np_reklamasjon']) && empty($data['np_reklamasjon'])) {
-                    $data['np_reklamasjon'] = true;
-                }
-                if (!empty($existing_payload['np_reklamasjon_source_order']) && empty($data['np_reklamasjon_source_order'])) {
-                    $data['np_reklamasjon_source_order'] = (int) $existing_payload['np_reklamasjon_source_order'];
-                }
-                if (!empty($existing_payload['np_bytte_storrelse']) && empty($data['np_bytte_storrelse'])) {
-                    $data['np_bytte_storrelse'] = true;
-                }
-                if (!empty($existing_payload['np_bytte_storrelse_source_order']) && empty($data['np_bytte_storrelse_source_order'])) {
-                    $data['np_bytte_storrelse_source_order'] = (int) $existing_payload['np_bytte_storrelse_source_order'];
-                }
+                    if ($processed_for_store >= $max_per_store) {
+                        break 3;
+                    }
+                    $processed_for_store++;
+                    $stats['checked']++;
 
-                $record = array(
-                    'store_key' => $store_key,
-                    'store_name' => isset($store['name']) ? (string) $store['name'] : '',
-                    'store_url' => isset($store['url']) ? (string) $store['url'] : '',
-                    'order_id' => $order_id,
-                    'order_number' => $order_number,
-                    'status' => $status,
-                    'currency' => $currency,
-                    'total' => (float) $total,
-                    'date_created_gmt' => $date_created_gmt !== '' ? $date_created_gmt : null,
-                    'date_modified_gmt' => $date_modified_gmt !== '' ? $date_modified_gmt : null,
-                    'order_admin_url' => np_order_hub_build_admin_order_url($store, $order_id),
-                    'payload' => wp_json_encode($data),
-                );
+                    $order_number = isset($data['number']) ? sanitize_text_field((string) $data['number']) : (string) $order_id;
+                    $currency = isset($data['currency']) ? sanitize_text_field((string) $data['currency']) : '';
+                    $total = np_order_hub_parse_numeric_value($data['total'] ?? 0);
+                    if ($total === null) {
+                        $total = 0.0;
+                    }
 
-                $now_gmt = current_time('mysql', true);
-                if ($existing_id > 0) {
-                    $record['updated_at_gmt'] = $now_gmt;
-                    $updated = $wpdb->update($table, $record, array('id' => $existing_id));
-                    if ($updated === false) {
-                        $stats['errors']++;
-                    } else {
+                    $date_created_gmt = np_order_hub_parse_datetime_gmt(
+                        $data['date_created_gmt'] ?? '',
+                        $data['date_created'] ?? ''
+                    );
+                    $date_modified_gmt = np_order_hub_parse_datetime_gmt(
+                        $data['date_modified_gmt'] ?? '',
+                        $data['date_modified'] ?? ''
+                    );
+
+                    $existing = $wpdb->get_row(
+                        $wpdb->prepare(
+                            "SELECT id, payload FROM $table WHERE store_key = %s AND order_id = %d",
+                            $store_key,
+                            $order_id
+                        ),
+                        ARRAY_A
+                    );
+                    $existing_id = $existing ? (int) $existing['id'] : 0;
+                    $existing_bucket = $existing ? np_order_hub_extract_delivery_bucket_from_payload_data($existing['payload']) : '';
+                    $existing_payload = array();
+                    if ($existing && !empty($existing['payload'])) {
+                        $decoded_existing_payload = json_decode((string) $existing['payload'], true);
+                        if (is_array($decoded_existing_payload)) {
+                            $existing_payload = $decoded_existing_payload;
+                        }
+                    }
+
+                    $store_bucket = np_order_hub_get_active_store_delivery_bucket($store);
+                    $bucket_to_set = $existing_bucket !== '' ? $existing_bucket : $store_bucket;
+                    $data[NP_ORDER_HUB_DELIVERY_BUCKET_KEY] = $bucket_to_set;
+                    if (!empty($existing_payload['np_reklamasjon']) && empty($data['np_reklamasjon'])) {
+                        $data['np_reklamasjon'] = true;
+                    }
+                    if (!empty($existing_payload['np_reklamasjon_source_order']) && empty($data['np_reklamasjon_source_order'])) {
+                        $data['np_reklamasjon_source_order'] = (int) $existing_payload['np_reklamasjon_source_order'];
+                    }
+                    if (!empty($existing_payload['np_bytte_storrelse']) && empty($data['np_bytte_storrelse'])) {
+                        $data['np_bytte_storrelse'] = true;
+                    }
+                    if (!empty($existing_payload['np_bytte_storrelse_source_order']) && empty($data['np_bytte_storrelse_source_order'])) {
+                        $data['np_bytte_storrelse_source_order'] = (int) $existing_payload['np_bytte_storrelse_source_order'];
+                    }
+
+                    $record = array(
+                        'store_key' => $store_key,
+                        'store_name' => isset($store['name']) ? (string) $store['name'] : '',
+                        'store_url' => isset($store['url']) ? (string) $store['url'] : '',
+                        'order_id' => $order_id,
+                        'order_number' => $order_number,
+                        'status' => $status,
+                        'currency' => $currency,
+                        'total' => (float) $total,
+                        'date_created_gmt' => $date_created_gmt !== '' ? $date_created_gmt : null,
+                        'date_modified_gmt' => $date_modified_gmt !== '' ? $date_modified_gmt : null,
+                        'order_admin_url' => np_order_hub_build_admin_order_url($store, $order_id),
+                        'payload' => wp_json_encode($data),
+                    );
+
+                    $now_gmt = current_time('mysql', true);
+                    if ($existing_id > 0) {
+                        $record['updated_at_gmt'] = $now_gmt;
+                        $updated = $wpdb->update($table, $record, array('id' => $existing_id));
+                        if ($updated === false) {
+                            $stats['errors']++;
+                            continue;
+                        }
                         $stats['updated']++;
-                    }
-                } else {
-                    $record['created_at_gmt'] = $date_created_gmt !== '' ? $date_created_gmt : $now_gmt;
-                    $record['updated_at_gmt'] = $now_gmt;
-                    $inserted = $wpdb->insert($table, $record);
-                    if ($inserted === false) {
-                        $stats['errors']++;
                     } else {
+                        $record['created_at_gmt'] = $date_created_gmt !== '' ? $date_created_gmt : $now_gmt;
+                        $record['updated_at_gmt'] = $now_gmt;
+                        $inserted = $wpdb->insert($table, $record);
+                        if ($inserted === false) {
+                            $stats['errors']++;
+                            continue;
+                        }
                         $stats['inserted']++;
                     }
-                }
-            }
 
-            $total_pages = isset($page_result['total_pages']) ? absint($page_result['total_pages']) : 0;
-            if (count($orders) < $per_page || ($total_pages > 0 && $page >= $total_pages) || $processed_for_store >= $max_per_store) {
-                break;
+                    $record['id'] = $existing_id > 0 ? $existing_id : (int) $wpdb->insert_id;
+                    np_order_hub_print_queue_queue_order($store, $record, 'print-backfill');
+                }
+
+                $total_pages = isset($page_result['total_pages']) ? absint($page_result['total_pages']) : 0;
+                if (count($orders) < $per_page || ($total_pages > 0 && $page >= $total_pages) || $processed_for_store >= $max_per_store) {
+                    break;
+                }
             }
         }
     }
@@ -1421,8 +1442,8 @@ function np_order_hub_debug_page() {
     echo '<input id="np-order-hub-rebuild-store" name="np_order_hub_rebuild_store" type="text" value="" placeholder="tangen_root_nordicprofil_no" style="width:220px; margin-right:8px;" />';
     echo '<label for="np-order-hub-rebuild-limit" style="margin-right:8px;">Max per store:</label>';
     echo '<input id="np-order-hub-rebuild-limit" name="np_order_hub_rebuild_limit" type="number" min="50" max="2000" value="300" style="width:90px; margin-right:8px;" />';
-    echo '<button class="button" type="submit">Rebuild processing orders now</button>';
-    echo '<p class="description" style="margin-top:6px;">Fetches <code>processing</code> orders and upserts them back into hub (tries Woo API first, falls back to token export, no email/webhook side effects).</p>';
+    echo '<button class="button" type="submit">Rebuild printable orders now</button>';
+    echo '<p class="description" style="margin-top:6px;">Fetches printable orders (<code>processing</code>, <code>reklamasjon</code>, <code>restordre</code>, <code>bytte-storrelse</code>) and upserts them back into hub (tries Woo API first, falls back to token export, no email/webhook side effects).</p>';
     echo '</form>';
 
     if (empty($jobs)) {

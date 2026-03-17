@@ -38,8 +38,16 @@ function np_order_hub_wpo_should_force_hub_delivery($order) {
         return false;
     }
     $status = method_exists($order, 'get_status') ? (string) $order->get_status() : '';
-    if ($status === 'restordre') {
+    if (in_array($status, array('reklamasjon', 'restordre', 'bytte-storrelse'), true)) {
         return true;
+    }
+    if ($status === 'processing') {
+        if ($order->get_meta('_np_reklamasjon_source_order', true)) {
+            return true;
+        }
+        if ($order->get_meta('_np_bytte_storrelse_source_order', true)) {
+            return true;
+        }
     }
     return (bool) $order->get_meta('_np_order_hub_force_send', true);
 }

@@ -259,7 +259,7 @@ function np_order_hub_wpo_push_order_to_hub($order_id, $event = 'created', $orde
 
         if ($order && is_a($order, 'WC_Order')) {
             $created_via = method_exists($order, 'get_created_via') ? (string) $order->get_created_via() : '';
-            if ($created_via === 'np-order-hub') {
+            if ($created_via === 'np-order-hub' && !np_order_hub_wpo_should_force_hub_delivery($order)) {
                 return;
             }
         } elseif ($event !== 'deleted') {
