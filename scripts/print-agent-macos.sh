@@ -353,7 +353,8 @@ build_finish_payload_json() {
     "$PRINT_META_VERIFIED_AT_GMT" \
     "$PRINT_META_VERIFICATION_STATE" \
     "$PRINT_META_VERIFICATION_METHOD" \
-    "$PRINT_META_VERIFICATION_NOTE" <<'PY'
+    "$PRINT_META_VERIFICATION_NOTE" \
+    "$AGENT_SCRIPT_VERSION" <<'PY'
 import json
 import sys
 
@@ -373,7 +374,8 @@ import sys
     verification_state,
     verification_method,
     verification_note,
-) = sys.argv[1:16]
+    agent_script_version,
+) = sys.argv[1:17]
 
 payload = {
     "job_key": job_key,
@@ -395,6 +397,7 @@ print_meta = {
     "verification_state": verification_state,
     "verification_method": verification_method,
     "verification_note": verification_note,
+    "agent_script_version": agent_script_version,
 }
 print_meta = {k: v for k, v in print_meta.items() if not (isinstance(v, str) and v == "")}
 if print_meta:
@@ -423,9 +426,43 @@ finish_job() {
     fi
   done
 
-  echo "Finish request failed after ${HTTP_RETRY_ATTEMPTS} attempts (job=${job_key}, claim=${claim_id})." >&2
+  queue_pending_finish_payload "${job_key}" "${claim_id}" "${payload}"
+  echo "Finish request failed after ${HTTP_RETRY_ATTEMPTS} attempts (job=${job_key}, claim=${claim_id}). Payload saved for retry." >&2
   return 1
 }
+
+queue_pending_finish_payload() {
+  local job_key="$1"
+  local claim_id="$2"
+  local payload="$3"
+  local safe_key safe_claim queue_file
+
+  safe_key="$(printf '%s' "${job_key}" | tr -cd 'A-Za-z0-9._-')"
+  safe_claim="$(printf '%s' "${claim_id}" | tr -cd 'A-Za-z0-9._-')"
+  if [[ -z "${safe_key}" ]]; then
+    safe_key="job"
+  fi
+  if [[ -z "${safe_claim}" ]]; then
+    safe_claim="claim"
+  fi
+  queue_file="${FINISH_QUEUE_DIR}/${safe_key}-${safe_claim}.json"
+  printf '%s' "${payload}" > "${queue_file}"
+}
+
+flush_pending_finish_queue() {
+  local queue_file
+
+  shopt -s nullglob
+  for queue_file in "${FINISH_QUEUE_DIR}"/*.json; do
+    if curl -sS --connect-timeout 10 --max-time "${CURL_TIMEOUT_SECONDS}" -X POST "${FINISH_URL}" -H "X-NP-Print-Token: ${PRINT_TOKEN}" -H "Content-Type: application/json" --data-binary "@${queue_file}" >/dev/null; then
+      echo "Flushed pending finish payload: $(basename "${queue_file}")"
+      rm -f "${queue_file}" || true
+    fi
+  done
+  shopt -u nullglob
+}
+
+flush_pending_finish_queue
 
 claim_payload="$(build_json "agent=${AGENT_NAME}")"
 claim_response=""
