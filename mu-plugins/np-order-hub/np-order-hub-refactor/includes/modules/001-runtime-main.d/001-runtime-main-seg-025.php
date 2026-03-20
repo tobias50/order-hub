@@ -363,12 +363,21 @@ function np_order_hub_render_order_editor_notes_list($notes) {
 
 function np_order_hub_render_order_editor_styles() {
     echo '<style>
-        .np-oh-editor-screen{max-width:1280px;margin-top:16px}
+        .np-oh-editor-screen.wrap{max-width:1280px}
         .np-oh-editor-screen #poststuff{padding-top:0}
-        .np-oh-editor-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:16px;align-items:start}
+        .np-oh-editor-screen #post-body.columns-2{margin-right:300px}
+        .np-oh-editor-screen #postbox-container-1{float:right;margin-right:-300px;width:280px}
+        .np-oh-editor-screen #postbox-container-2{float:none;width:auto}
         .np-oh-editor-screen .postbox{margin:0 0 16px}
-        .np-oh-editor-screen .postbox .hndle{margin:0;padding:12px 14px;border-bottom:1px solid #ccd0d4;font-size:14px;font-weight:600}
-        .np-oh-editor-screen .inside{padding:14px}
+        .np-oh-editor-screen .postbox .hndle{margin:0;padding:11px 12px;border-bottom:1px solid #ccd0d4;font-size:13px;font-weight:600}
+        .np-oh-editor-screen .inside{margin:0;padding:12px}
+        .np-oh-editor-screen .np-oh-order-overview{margin:8px 0 18px;color:#50575e}
+        .np-oh-editor-screen .np-oh-order-overview span{display:inline-block;margin:0 18px 6px 0}
+        .np-oh-editor-screen .order_data_column_container{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+        .np-oh-editor-screen .order_data_column h3,
+        .np-oh-editor-screen .np-oh-items-section h3,
+        .np-oh-editor-screen .np-oh-notes-grid h3{margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid #eee;font-size:13px}
+        .np-oh-editor-screen .np-oh-readonly-list p{margin:0 0 8px}
         .np-oh-editor-screen .np-oh-two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
         .np-oh-editor-screen .np-oh-item-summary{display:flex;gap:12px;align-items:flex-start}
         .np-oh-editor-screen .np-oh-item-thumb img{display:block;width:44px;height:44px;object-fit:cover;border:1px solid #ccd0d4;border-radius:2px;background:#fff}
@@ -377,13 +386,33 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .np-oh-item-meta li{margin:0 0 4px}
         .np-oh-editor-screen .np-oh-qty-input{width:76px}
         .np-oh-editor-screen .np-oh-amount{text-align:right;white-space:nowrap}
+        .np-oh-editor-screen .np-oh-items-table td,
+        .np-oh-editor-screen .np-oh-items-table th{vertical-align:top}
+        .np-oh-editor-screen .np-oh-items-table tfoot th,
+        .np-oh-editor-screen .np-oh-items-table tfoot td{background:#fafafa}
+        .np-oh-editor-screen .np-oh-items-section + .np-oh-items-section{margin-top:18px}
+        .np-oh-editor-screen .np-oh-sidebar-form + .np-oh-sidebar-form{margin-top:14px;padding-top:14px;border-top:1px solid #eee}
+        .np-oh-editor-screen .np-oh-sidebar-actions .button{margin:0 8px 8px 0}
+        .np-oh-editor-screen .np-oh-sidebar-actions select,
+        .np-oh-editor-screen .np-oh-sidebar-actions input[type=text]{width:100%}
         .np-oh-editor-screen .np-oh-meta-list{margin:0}
         .np-oh-editor-screen .np-oh-meta-list dt{font-weight:600;margin:0 0 4px}
         .np-oh-editor-screen .np-oh-meta-list dd{margin:0 0 12px}
-        .np-oh-editor-screen .np-oh-panel-actions .button{margin:0 8px 8px 0}
         .np-oh-editor-screen .np-oh-panel-actions .button-link-delete{padding:0}
-        @media (max-width: 1180px){
-            .np-oh-editor-grid{grid-template-columns:1fr}
+        .np-oh-editor-screen .form-table th{width:120px;padding-left:0}
+        .np-oh-editor-screen .form-table td{padding-right:0}
+        .np-oh-editor-screen .regular-text,
+        .np-oh-editor-screen .large-text,
+        .np-oh-editor-screen textarea,
+        .np-oh-editor-screen select{max-width:100%}
+        @media (max-width: 1080px){
+            .np-oh-editor-screen #post-body.columns-2{margin-right:0}
+            .np-oh-editor-screen #postbox-container-1,
+            .np-oh-editor-screen #postbox-container-2{float:none;width:100%;margin-right:0}
+            .np-oh-editor-screen #postbox-container-1{margin-top:16px}
+        }
+        @media (max-width: 960px){
+            .np-oh-editor-screen .order_data_column_container{grid-template-columns:1fr}
         }
         @media (max-width: 860px){
             .np-oh-editor-screen .np-oh-two-col{grid-template-columns:1fr}
@@ -960,24 +989,142 @@ function np_order_hub_order_details_page() {
     $transaction_id = trim((string) ($live_order['transaction_id'] ?? ''));
     $created_via = trim((string) ($live_order['created_via'] ?? ''));
 
-    echo '<div class="np-oh-editor-screen">';
+    echo '<div class="wrap woocommerce np-oh-editor-screen">';
     np_order_hub_render_order_editor_styles();
+    echo '<h1 class="wp-heading-inline">Edit order ' . esc_html($order_label) . '</h1>';
+    echo '<a class="page-title-action" href="' . esc_url(admin_url('admin.php?page=np-order-hub')) . '">Back to hub</a>';
+    echo '<div class="np-oh-order-overview">';
+    echo '<span><strong>Store:</strong> ' . esc_html($record['store_name']) . '</span>';
+    if ($date_label !== '') {
+        echo '<span><strong>Created:</strong> ' . esc_html($date_label) . '</span>';
+    }
+    if ($status_label !== '') {
+        echo '<span><strong>Status:</strong> ' . esc_html($status_label) . '</span>';
+    }
+    echo '<span><strong>Total:</strong> ' . esc_html($total_display) . '</span>';
+    echo '</div>';
     echo '<div id="poststuff">';
-    echo '<div class="np-oh-editor-grid">';
-    echo '<div class="np-oh-editor-main">';
+    echo '<div id="post-body" class="metabox-holder columns-2">';
+    echo '<div id="postbox-container-1" class="postbox-container">';
+
+    echo '<div class="postbox">';
+    echo '<h2 class="hndle">Order actions</h2>';
+    echo '<div class="inside np-oh-sidebar-actions">';
+    if (!empty($allowed_statuses)) {
+        echo '<form class="np-oh-sidebar-form" method="post">';
+        wp_nonce_field('np_order_hub_update_status');
+        echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+        echo '<p><label for="np-order-hub-status-update"><strong>Status</strong></label></p>';
+        echo '<select name="order_status" id="np-order-hub-status-update">';
+        foreach ($allowed_statuses as $key => $label) {
+            $selected = selected($record['status'], $key, false);
+            echo '<option value="' . esc_attr($key) . '"' . $selected . '>' . esc_html($label) . '</option>';
+        }
+        echo '</select>';
+        echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_status" value="1">Update</button></p>';
+        if ($token_missing) {
+            echo '<p class="description">Store token missing in hub store settings.</p>';
+        }
+        echo '</form>';
+    }
+
+    echo '<form class="np-oh-sidebar-form" method="post">';
+    wp_nonce_field('np_order_hub_update_delivery_bucket');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<p><label for="np-order-hub-delivery-bucket"><strong>Delivery bucket</strong></label></p>';
+    echo '<select name="delivery_bucket" id="np-order-hub-delivery-bucket">';
+    echo '<option value="standard"' . selected($delivery_bucket, 'standard', false) . '>Levering 3-5 dager</option>';
+    echo '<option value="scheduled"' . selected($delivery_bucket, 'scheduled', false) . '>Levering til bestemt dato</option>';
+    echo '</select>';
+    echo '<p><button class="button" type="submit" name="np_order_hub_update_delivery_bucket" value="1">Update</button></p>';
+    echo '</form>';
+
+    echo '<form class="np-oh-sidebar-form" method="post">';
+    wp_nonce_field('np_order_hub_send_order_email');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<p><label for="np-order-hub-email-action"><strong>Woo email</strong></label></p>';
+    echo '<select name="order_email_action" id="np-order-hub-email-action">';
+    foreach ($email_actions as $action_key => $action_label) {
+        echo '<option value="' . esc_attr((string) $action_key) . '"' . selected($order_email_action_value, (string) $action_key, false) . '>' . esc_html((string) $action_label) . '</option>';
+    }
+    echo '</select>';
+    echo '<p><button class="button" type="submit" name="np_order_hub_send_order_email" value="1">Send email</button></p>';
+    echo '</form>';
+
+    echo '<div class="np-oh-sidebar-form">';
+    if ($packing_url !== '') {
+        echo '<a class="button" href="' . esc_url($packing_url) . '" target="_blank" rel="noopener">Packing slip</a>';
+    }
+    if ($open_order_url !== '') {
+        echo '<a class="button button-primary" href="' . esc_url($open_order_url) . '" target="_blank" rel="noopener">Open in store</a>';
+    }
+    echo '<form method="post" style="margin-top:8px;">';
+    wp_nonce_field('np_order_hub_refresh_live_order');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<button class="button" type="submit" name="np_order_hub_refresh_live_order" value="1">Refresh live data</button>';
+    echo '</form>';
+    echo '<form method="post" style="margin-top:8px;">';
+    wp_nonce_field('np_order_hub_delete_record');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<button class="button-link-delete" type="submit" name="np_order_hub_delete_record" value="1" onclick="return confirm(\'Remove this order from the hub?\');">Delete from hub</button>';
+    echo '</form>';
+    echo '</div>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div id="postbox-container-2" class="postbox-container">';
+
+    echo '<div class="postbox">';
+    echo '<h2 class="hndle">Order data</h2>';
+    echo '<div class="inside">';
+    echo '<form method="post">';
+    wp_nonce_field('np_order_hub_update_addresses');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<div class="order_data_column_container">';
+    echo '<div class="order_data_column">';
+    echo '<h3>General</h3>';
+    echo '<div class="np-oh-readonly-list">';
+    echo '<p><strong>Order:</strong> ' . esc_html($order_label) . '</p>';
+    echo '<p><strong>Store:</strong> ' . esc_html($record['store_name']) . '</p>';
+    if ($date_label !== '') {
+        echo '<p><strong>Created:</strong> ' . esc_html($date_label) . '</p>';
+    }
+    if ($modified_label !== '') {
+        echo '<p><strong>Live synced:</strong> ' . esc_html($modified_label) . '</p>';
+    }
+    echo '<p><strong>Total:</strong> ' . esc_html($total_display) . '</p>';
+    echo '<p><strong>Payment method:</strong> ' . esc_html($payment_method_title !== '' ? $payment_method_title : '—') . '</p>';
+    echo '<p><strong>Transaction ID:</strong> ' . esc_html($transaction_id !== '' ? $transaction_id : '—') . '</p>';
+    echo '<p><strong>Created via:</strong> ' . esc_html($created_via !== '' ? $created_via : '—') . '</p>';
+    echo '</div>';
+    echo '</div>';
+    echo '<div class="order_data_column">';
+    echo '<h3>Billing</h3>';
+    np_order_hub_render_order_editor_address_fields('billing', $live_billing, 'billing');
+    echo '</div>';
+    echo '<div class="order_data_column">';
+    echo '<h3>Shipping</h3>';
+    np_order_hub_render_order_editor_address_fields('shipping', $live_shipping, 'shipping');
+    echo '</div>';
+    echo '</div>';
+    echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_addresses" value="1">Save order data</button></p>';
+    echo '</form>';
+    echo '</div>';
+    echo '</div>';
 
     echo '<div class="postbox">';
     echo '<h2 class="hndle">Order items</h2>';
     echo '<div class="inside">';
     echo '<p class="description">Hub follows the store order. Product rows can only be adjusted by quantity here.</p>';
+    echo '<div class="np-oh-items-section">';
     if (empty($line_items)) {
         echo '<p class="description">No line items found.</p>';
     } else {
         echo '<form method="post">';
         wp_nonce_field('np_order_hub_update_line_items');
         echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
-        echo '<table class="widefat striped">';
-        echo '<thead><tr><th>Product</th><th>Qty</th><th class="np-oh-amount">Line total</th></tr></thead><tbody>';
+        echo '<table class="widefat striped np-oh-items-table">';
+        echo '<thead><tr><th>Product</th><th>Qty</th><th class="np-oh-amount">Total</th></tr></thead><tbody>';
         foreach ($line_items as $item) {
             if (!is_array($item)) {
                 continue;
@@ -1002,35 +1149,11 @@ function np_order_hub_order_details_page() {
         echo '</form>';
     }
     echo '</div>';
-    echo '</div>';
 
-    echo '<div class="postbox">';
-    echo '<h2 class="hndle">Addresses</h2>';
-    echo '<div class="inside">';
-    echo '<form method="post">';
-    wp_nonce_field('np_order_hub_update_addresses');
-    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<div class="np-oh-items-section">';
     echo '<div class="np-oh-two-col">';
     echo '<div>';
-    echo '<h3 style="margin-top:0;">Billing</h3>';
-    np_order_hub_render_order_editor_address_fields('billing', $live_billing, 'billing');
-    echo '</div>';
-    echo '<div>';
-    echo '<h3 style="margin-top:0;">Shipping</h3>';
-    np_order_hub_render_order_editor_address_fields('shipping', $live_shipping, 'shipping');
-    echo '</div>';
-    echo '</div>';
-    echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_addresses" value="1">Save addresses</button></p>';
-    echo '</form>';
-    echo '</div>';
-    echo '</div>';
-
-    echo '<div class="postbox">';
-    echo '<h2 class="hndle">Shipping and discounts</h2>';
-    echo '<div class="inside">';
-    echo '<div class="np-oh-two-col">';
-    echo '<div>';
-    echo '<h3 style="margin-top:0;">Shipping</h3>';
+    echo '<h3>Shipping lines</h3>';
     echo '<form method="post">';
     wp_nonce_field('np_order_hub_update_shipping');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
@@ -1056,7 +1179,7 @@ function np_order_hub_order_details_page() {
         }
         echo '</tbody></table>';
     }
-    echo '<h4 style="margin-top:16px;">Add shipping line</h4>';
+    echo '<h4>Add shipping line</h4>';
     echo '<div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">';
     echo '<div><label><strong>Title</strong><br /><input type="text" name="new_shipping[method_title]" class="regular-text" value="' . esc_attr((string) $new_shipping_form['method_title']) . '" /></label></div>';
     echo '<div><label><strong>Method ID</strong><br /><input type="text" name="new_shipping[method_id]" value="' . esc_attr((string) $new_shipping_form['method_id']) . '" style="width:140px;" /></label></div>';
@@ -1067,7 +1190,7 @@ function np_order_hub_order_details_page() {
     echo '</div>';
 
     echo '<div>';
-    echo '<h3 style="margin-top:0;">Fees / discounts</h3>';
+    echo '<h3>Fees / discounts</h3>';
     echo '<form method="post">';
     wp_nonce_field('np_order_hub_update_fees');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
@@ -1092,7 +1215,7 @@ function np_order_hub_order_details_page() {
         }
         echo '</tbody></table>';
     }
-    echo '<h4 style="margin-top:16px;">Add fee / discount</h4>';
+    echo '<h4>Add fee / discount</h4>';
     echo '<p class="description">Use a negative amount for a discount.</p>';
     echo '<div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">';
     echo '<div><label><strong>Name</strong><br /><input type="text" name="new_fee[name]" class="regular-text" value="' . esc_attr((string) $new_fee_form['name']) . '" /></label></div>';
@@ -1111,11 +1234,11 @@ function np_order_hub_order_details_page() {
     echo '</div>';
 
     echo '<div class="postbox">';
-    echo '<h2 class="hndle">Notes</h2>';
+    echo '<h2 class="hndle">Order notes</h2>';
     echo '<div class="inside">';
-    echo '<div class="np-oh-two-col">';
+    echo '<div class="np-oh-two-col np-oh-notes-grid">';
     echo '<div>';
-    echo '<h3 style="margin-top:0;">Customer note</h3>';
+    echo '<h3>Customer note</h3>';
     echo '<form method="post">';
     wp_nonce_field('np_order_hub_update_customer_note');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
@@ -1124,7 +1247,7 @@ function np_order_hub_order_details_page() {
     echo '</form>';
     echo '</div>';
     echo '<div>';
-    echo '<h3 style="margin-top:0;">Internal order note</h3>';
+    echo '<h3>Add internal note</h3>';
     echo '<form method="post">';
     wp_nonce_field('np_order_hub_add_order_note');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
@@ -1135,101 +1258,6 @@ function np_order_hub_order_details_page() {
     echo '</div>';
     echo '<h3 style="margin-top:24px;">Recent order notes</h3>';
     np_order_hub_render_order_editor_notes_list($order_notes);
-    echo '</div>';
-    echo '</div>';
-
-    echo '</div>';
-    echo '<div class="np-oh-editor-side">';
-
-    echo '<div class="postbox">';
-    echo '<h2 class="hndle">Order</h2>';
-    echo '<div class="inside">';
-    echo '<dl class="np-oh-meta-list">';
-    echo '<dt>Order</dt><dd>' . esc_html($order_label) . '</dd>';
-    echo '<dt>Store</dt><dd>' . esc_html($record['store_name']) . '</dd>';
-    if ($date_label !== '') {
-        echo '<dt>Date</dt><dd>' . esc_html($date_label) . '</dd>';
-    }
-    if ($status_label !== '') {
-        echo '<dt>Status</dt><dd>' . esc_html($status_label) . '</dd>';
-    }
-    if ($modified_label !== '') {
-        echo '<dt>Live synced</dt><dd>' . esc_html($modified_label) . '</dd>';
-    }
-    echo '<dt>Total</dt><dd>' . esc_html($total_display) . '</dd>';
-    echo '<dt>Payment method</dt><dd>' . esc_html($payment_method_title !== '' ? $payment_method_title : '—') . '</dd>';
-    echo '<dt>Transaction ID</dt><dd>' . esc_html($transaction_id !== '' ? $transaction_id : '—') . '</dd>';
-    echo '<dt>Created via</dt><dd>' . esc_html($created_via !== '' ? $created_via : '—') . '</dd>';
-    echo '</dl>';
-    echo '</div>';
-    echo '</div>';
-
-    echo '<div class="postbox">';
-    echo '<h2 class="hndle">Actions</h2>';
-    echo '<div class="inside np-oh-panel-actions">';
-    if (!empty($allowed_statuses)) {
-        echo '<form method="post" style="margin:0 0 16px;">';
-        wp_nonce_field('np_order_hub_update_status');
-        echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
-        echo '<p><label for="np-order-hub-status-update"><strong>Status</strong></label></p>';
-        echo '<select name="order_status" id="np-order-hub-status-update" style="width:100%;max-width:260px;">';
-        foreach ($allowed_statuses as $key => $label) {
-            $selected = selected($record['status'], $key, false);
-            echo '<option value="' . esc_attr($key) . '"' . $selected . '>' . esc_html($label) . '</option>';
-        }
-        echo '</select>';
-        echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_status" value="1">Update status</button></p>';
-        if ($token_missing) {
-            echo '<p class="description">Store token missing in hub store settings.</p>';
-        }
-        echo '</form>';
-    }
-
-    echo '<form method="post" style="margin:0 0 16px;">';
-    wp_nonce_field('np_order_hub_update_delivery_bucket');
-    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
-    echo '<p><label for="np-order-hub-delivery-bucket"><strong>Delivery bucket</strong></label></p>';
-    echo '<select name="delivery_bucket" id="np-order-hub-delivery-bucket" style="width:100%;max-width:260px;">';
-    echo '<option value="standard"' . selected($delivery_bucket, 'standard', false) . '>Levering 3-5 dager</option>';
-    echo '<option value="scheduled"' . selected($delivery_bucket, 'scheduled', false) . '>Levering til bestemt dato</option>';
-    echo '</select>';
-    echo '<p><button class="button" type="submit" name="np_order_hub_update_delivery_bucket" value="1">Update bucket</button></p>';
-    echo '</form>';
-
-    if ($packing_url !== '') {
-        echo '<a class="button" href="' . esc_url($packing_url) . '" target="_blank" rel="noopener">Packing slip</a>';
-    }
-    if ($open_order_url !== '') {
-        echo '<a class="button button-primary" href="' . esc_url($open_order_url) . '" target="_blank" rel="noopener">Open order in store</a>';
-    }
-
-    echo '<form method="post" style="margin-top:8px;">';
-    wp_nonce_field('np_order_hub_refresh_live_order');
-    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
-    echo '<button class="button" type="submit" name="np_order_hub_refresh_live_order" value="1">Refresh live data</button>';
-    echo '</form>';
-
-    echo '<form method="post" style="margin-top:8px;">';
-    wp_nonce_field('np_order_hub_delete_record');
-    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
-    echo '<button class="button-link-delete" type="submit" name="np_order_hub_delete_record" value="1" onclick="return confirm(\'Remove this order from the hub?\');">Delete from hub</button>';
-    echo '</form>';
-    echo '</div>';
-    echo '</div>';
-
-    echo '<div class="postbox">';
-    echo '<h2 class="hndle">Send Woo email</h2>';
-    echo '<div class="inside">';
-    echo '<form method="post">';
-    wp_nonce_field('np_order_hub_send_order_email');
-    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
-    echo '<select name="order_email_action" style="width:100%;max-width:260px;">';
-    foreach ($email_actions as $action_key => $action_label) {
-        echo '<option value="' . esc_attr((string) $action_key) . '"' . selected($order_email_action_value, (string) $action_key, false) . '>' . esc_html((string) $action_label) . '</option>';
-    }
-    echo '</select>';
-    echo '<p><button class="button" type="submit" name="np_order_hub_send_order_email" value="1">Send email</button></p>';
-    echo '</form>';
     echo '</div>';
     echo '</div>';
 
