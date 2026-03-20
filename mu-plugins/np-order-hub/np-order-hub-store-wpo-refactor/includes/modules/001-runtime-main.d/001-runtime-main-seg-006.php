@@ -235,6 +235,36 @@ function np_order_hub_wpo_register_routes() {
         'callback' => 'np_order_hub_wpo_send_order_email',
         'permission_callback' => '__return_true',
     ));
+    register_rest_route('np-order-hub/v1', '/order-product-search', array(
+        'methods' => 'GET',
+        'callback' => 'np_order_hub_wpo_search_order_products',
+        'permission_callback' => '__return_true',
+    ));
+    register_rest_route('np-order-hub/v1', '/order-items', array(
+        'methods' => 'POST',
+        'callback' => 'np_order_hub_wpo_update_order_items',
+        'permission_callback' => '__return_true',
+    ));
+    register_rest_route('np-order-hub/v1', '/order-item-add', array(
+        'methods' => 'POST',
+        'callback' => 'np_order_hub_wpo_add_order_item',
+        'permission_callback' => '__return_true',
+    ));
+    register_rest_route('np-order-hub/v1', '/order-shipping', array(
+        'methods' => 'POST',
+        'callback' => 'np_order_hub_wpo_update_order_shipping',
+        'permission_callback' => '__return_true',
+    ));
+    register_rest_route('np-order-hub/v1', '/order-fees', array(
+        'methods' => 'POST',
+        'callback' => 'np_order_hub_wpo_update_order_fees',
+        'permission_callback' => '__return_true',
+    ));
+    register_rest_route('np-order-hub/v1', '/order-recalculate', array(
+        'methods' => 'POST',
+        'callback' => 'np_order_hub_wpo_recalculate_order_totals',
+        'permission_callback' => '__return_true',
+    ));
     register_rest_route('np-order-hub/v1', '/orders-export', array(
         'methods' => 'GET',
         'callback' => 'np_order_hub_wpo_orders_export',

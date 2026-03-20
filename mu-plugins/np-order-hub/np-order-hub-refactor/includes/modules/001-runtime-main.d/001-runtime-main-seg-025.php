@@ -361,6 +361,33 @@ function np_order_hub_render_order_editor_notes_list($notes) {
     echo '</tbody></table>';
 }
 
+function np_order_hub_build_order_editor_product_selection_value($result) {
+    if (!is_array($result)) {
+        return '';
+    }
+    $product_id = isset($result['product_id']) ? absint($result['product_id']) : 0;
+    $variation_id = isset($result['variation_id']) ? absint($result['variation_id']) : 0;
+    $price = isset($result['price']) ? (string) $result['price'] : '';
+    return $product_id . '|' . $variation_id . '|' . $price;
+}
+
+function np_order_hub_parse_order_editor_product_selection($value) {
+    $value = trim((string) $value);
+    if ($value === '') {
+        return array(
+            'product_id' => 0,
+            'variation_id' => 0,
+            'price' => null,
+        );
+    }
+    $parts = explode('|', $value);
+    return array(
+        'product_id' => isset($parts[0]) ? absint($parts[0]) : 0,
+        'variation_id' => isset($parts[1]) ? absint($parts[1]) : 0,
+        'price' => isset($parts[2]) ? np_order_hub_parse_numeric_value($parts[2]) : null,
+    );
+}
+
 function np_order_hub_order_details_page() {
     if (!current_user_can('manage_options')) {
         return;
@@ -400,6 +427,8 @@ function np_order_hub_order_details_page() {
         ? $live_order['email_actions']
         : np_order_hub_get_supported_order_email_actions();
     $line_items = isset($live_order['line_items']) && is_array($live_order['line_items']) ? $live_order['line_items'] : array();
+    $shipping_lines = isset($live_order['shipping_lines']) && is_array($live_order['shipping_lines']) ? $live_order['shipping_lines'] : array();
+    $fee_lines = isset($live_order['fee_lines']) && is_array($live_order['fee_lines']) ? $live_order['fee_lines'] : array();
     $help_scout_billing = $live_billing;
     $help_scout_email = !empty($help_scout_billing['email']) ? sanitize_email((string) $help_scout_billing['email']) : '';
     $help_scout_first_name = !empty($help_scout_billing['first_name']) ? sanitize_text_field((string) $help_scout_billing['first_name']) : '';
@@ -407,6 +436,20 @@ function np_order_hub_order_details_page() {
     $customer_note_value = isset($live_order['customer_note']) ? (string) $live_order['customer_note'] : '';
     $order_note_form_value = '';
     $order_email_action_value = 'customer_processing_order';
+    $product_search_query = '';
+    $product_search_results = array();
+    $product_selection_value = '';
+    $add_item_quantity_value = 1;
+    $add_item_unit_price_value = '';
+    $new_shipping_form = array(
+        'method_title' => '',
+        'method_id' => 'manual_shipping',
+        'total' => '',
+    );
+    $new_fee_form = array(
+        'name' => '',
+        'amount' => '',
+    );
 
     $help_scout_notice = null;
     $help_scout_form = array(
@@ -560,6 +603,162 @@ function np_order_hub_order_details_page() {
         }
     }
 
+    if ($record && !empty($_POST['np_order_hub_search_product'])) {
+        check_admin_referer('np_order_hub_search_product');
+        $product_search_query = sanitize_text_field((string) ($_POST['product_search_query'] ?? ''));
+        $search_result = np_order_hub_search_remote_order_products($store, $product_search_query, 25);
+        if (is_wp_error($search_result)) {
+            $live_order_notice = array('type' => 'error', 'message' => $search_result->get_error_message());
+        } else {
+            $product_search_results = isset($search_result['results']) && is_array($search_result['results']) ? $search_result['results'] : array();
+            if (empty($product_search_results)) {
+                $live_order_notice = array('type' => 'error', 'message' => 'No products found for that search.');
+            } else {
+                $product_selection_value = np_order_hub_build_order_editor_product_selection_value($product_search_results[0]);
+                $add_item_unit_price_value = (string) ($product_search_results[0]['price'] ?? '');
+                $live_order_notice = array('type' => 'success', 'message' => 'Product search updated.');
+            }
+        }
+    }
+
+    if ($record && !empty($_POST['np_order_hub_update_line_items'])) {
+        check_admin_referer('np_order_hub_update_line_items');
+        $posted_items = isset($_POST['line_items']) && is_array($_POST['line_items']) ? $_POST['line_items'] : array();
+        $items_payload = array();
+        foreach ($posted_items as $item_id => $item_row) {
+            if (!is_array($item_row)) {
+                continue;
+            }
+            $items_payload[] = array(
+                'item_id' => absint($item_id),
+                'quantity' => absint($item_row['quantity'] ?? 0),
+                'unit_price' => np_order_hub_parse_numeric_value($item_row['unit_price'] ?? null),
+                'remove' => !empty($item_row['remove']) ? 1 : 0,
+            );
+        }
+        $result = np_order_hub_update_remote_order_items($store, (int) $record['order_id'], $items_payload);
+        if (is_wp_error($result)) {
+            $live_order_notice = array('type' => 'error', 'message' => $result->get_error_message());
+        } elseif (is_array($result) && !empty($result['order']) && is_array($result['order'])) {
+            $record = np_order_hub_upsert_record_from_remote_payload($record, $store, $result['order']);
+            $live_order_notice = array('type' => 'success', 'message' => 'Line items updated.');
+        }
+    }
+
+    if ($record && !empty($_POST['np_order_hub_add_line_item'])) {
+        check_admin_referer('np_order_hub_add_line_item');
+        $product_search_query = sanitize_text_field((string) ($_POST['product_search_query'] ?? ''));
+        $product_selection_value = (string) ($_POST['product_selection'] ?? '');
+        $selected_product = np_order_hub_parse_order_editor_product_selection($product_selection_value);
+        $add_item_quantity_value = absint($_POST['add_item_quantity'] ?? 1);
+        if ($add_item_quantity_value < 1) {
+            $add_item_quantity_value = 1;
+        }
+        $add_item_unit_price_raw = (string) ($_POST['add_item_unit_price'] ?? '');
+        $add_item_unit_price_value = $add_item_unit_price_raw;
+        $unit_price = np_order_hub_parse_numeric_value($add_item_unit_price_raw);
+
+        $result = np_order_hub_add_remote_order_item(
+            $store,
+            (int) $record['order_id'],
+            (int) $selected_product['product_id'],
+            (int) $selected_product['variation_id'],
+            $add_item_quantity_value,
+            $unit_price
+        );
+        if (is_wp_error($result)) {
+            $live_order_notice = array('type' => 'error', 'message' => $result->get_error_message());
+        } elseif (is_array($result) && !empty($result['order']) && is_array($result['order'])) {
+            $record = np_order_hub_upsert_record_from_remote_payload($record, $store, $result['order']);
+            $live_order_notice = array('type' => 'success', 'message' => 'Product added to order.');
+            $product_search_query = '';
+            $product_search_results = array();
+            $product_selection_value = '';
+            $add_item_quantity_value = 1;
+            $add_item_unit_price_value = '';
+        }
+    }
+
+    if ($record && !empty($_POST['np_order_hub_update_shipping'])) {
+        check_admin_referer('np_order_hub_update_shipping');
+        $posted_shipping = isset($_POST['shipping_lines']) && is_array($_POST['shipping_lines']) ? $_POST['shipping_lines'] : array();
+        $shipping_payload = array();
+        foreach ($posted_shipping as $item_id => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $shipping_payload[] = array(
+                'item_id' => absint($item_id),
+                'method_title' => sanitize_text_field((string) ($row['method_title'] ?? '')),
+                'method_id' => sanitize_key((string) ($row['method_id'] ?? '')),
+                'total' => np_order_hub_parse_numeric_value($row['total'] ?? null),
+                'remove' => !empty($row['remove']) ? 1 : 0,
+            );
+        }
+        $new_shipping_form = array(
+            'method_title' => sanitize_text_field((string) ($_POST['new_shipping']['method_title'] ?? '')),
+            'method_id' => sanitize_key((string) ($_POST['new_shipping']['method_id'] ?? 'manual_shipping')),
+            'total' => (string) ($_POST['new_shipping']['total'] ?? ''),
+        );
+        $new_shipping_payload = array(
+            'method_title' => $new_shipping_form['method_title'],
+            'method_id' => $new_shipping_form['method_id'],
+            'total' => np_order_hub_parse_numeric_value($new_shipping_form['total']),
+        );
+        $result = np_order_hub_update_remote_order_shipping($store, (int) $record['order_id'], $shipping_payload, $new_shipping_payload);
+        if (is_wp_error($result)) {
+            $live_order_notice = array('type' => 'error', 'message' => $result->get_error_message());
+        } elseif (is_array($result) && !empty($result['order']) && is_array($result['order'])) {
+            $record = np_order_hub_upsert_record_from_remote_payload($record, $store, $result['order']);
+            $live_order_notice = array('type' => 'success', 'message' => 'Shipping updated.');
+            $new_shipping_form = array('method_title' => '', 'method_id' => 'manual_shipping', 'total' => '');
+        }
+    }
+
+    if ($record && !empty($_POST['np_order_hub_update_fees'])) {
+        check_admin_referer('np_order_hub_update_fees');
+        $posted_fees = isset($_POST['fee_lines']) && is_array($_POST['fee_lines']) ? $_POST['fee_lines'] : array();
+        $fee_payload = array();
+        foreach ($posted_fees as $item_id => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $fee_payload[] = array(
+                'item_id' => absint($item_id),
+                'name' => sanitize_text_field((string) ($row['name'] ?? '')),
+                'amount' => np_order_hub_parse_numeric_value($row['amount'] ?? null),
+                'remove' => !empty($row['remove']) ? 1 : 0,
+            );
+        }
+        $new_fee_form = array(
+            'name' => sanitize_text_field((string) ($_POST['new_fee']['name'] ?? '')),
+            'amount' => (string) ($_POST['new_fee']['amount'] ?? ''),
+        );
+        $new_fee_payload = array(
+            'name' => $new_fee_form['name'],
+            'amount' => np_order_hub_parse_numeric_value($new_fee_form['amount']),
+        );
+        $result = np_order_hub_update_remote_order_fees($store, (int) $record['order_id'], $fee_payload, $new_fee_payload);
+        if (is_wp_error($result)) {
+            $live_order_notice = array('type' => 'error', 'message' => $result->get_error_message());
+        } elseif (is_array($result) && !empty($result['order']) && is_array($result['order'])) {
+            $record = np_order_hub_upsert_record_from_remote_payload($record, $store, $result['order']);
+            $live_order_notice = array('type' => 'success', 'message' => 'Fees / discounts updated.');
+            $new_fee_form = array('name' => '', 'amount' => '');
+        }
+    }
+
+    if ($record && !empty($_POST['np_order_hub_recalculate_order'])) {
+        check_admin_referer('np_order_hub_recalculate_order');
+        $result = np_order_hub_recalculate_remote_order($store, (int) $record['order_id']);
+        if (is_wp_error($result)) {
+            $live_order_notice = array('type' => 'error', 'message' => $result->get_error_message());
+        } elseif (is_array($result) && !empty($result['order']) && is_array($result['order'])) {
+            $record = np_order_hub_upsert_record_from_remote_payload($record, $store, $result['order']);
+            $live_order_notice = array('type' => 'success', 'message' => 'Order totals recalculated.');
+        }
+    }
+
     $status_notice = null;
     if ($record && !empty($_POST['np_order_hub_update_status'])) {
         check_admin_referer('np_order_hub_update_status');
@@ -689,6 +888,8 @@ function np_order_hub_order_details_page() {
         ? $live_order['email_actions']
         : np_order_hub_get_supported_order_email_actions();
     $line_items = isset($live_order['line_items']) && is_array($live_order['line_items']) ? $live_order['line_items'] : array();
+    $shipping_lines = isset($live_order['shipping_lines']) && is_array($live_order['shipping_lines']) ? $live_order['shipping_lines'] : array();
+    $fee_lines = isset($live_order['fee_lines']) && is_array($live_order['fee_lines']) ? $live_order['fee_lines'] : array();
     $help_scout_billing = $live_billing;
     $help_scout_email = !empty($help_scout_billing['email']) ? sanitize_email((string) $help_scout_billing['email']) : '';
     $help_scout_first_name = !empty($help_scout_billing['first_name']) ? sanitize_text_field((string) $help_scout_billing['first_name']) : '';
@@ -871,6 +1072,159 @@ function np_order_hub_order_details_page() {
     echo '</div>';
     echo '</div>';
     echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_addresses" value="1">Save addresses</button></p>';
+    echo '</form>';
+
+    echo '<h3 style="margin-top:24px;">Line items</h3>';
+    if (empty($line_items)) {
+        echo '<p class="description">No line items found.</p>';
+    } else {
+        echo '<form method="post">';
+        wp_nonce_field('np_order_hub_update_line_items');
+        echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+        echo '<table class="widefat striped" style="max-width:1100px;">';
+        echo '<thead><tr><th>Product</th><th>Qty</th><th>Unit price</th><th>Line total</th><th>SKU</th><th>Remove</th></tr></thead><tbody>';
+        foreach ($line_items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $item_id = isset($item['id']) ? (int) $item['id'] : 0;
+            if ($item_id < 1) {
+                continue;
+            }
+            $name = isset($item['name']) ? (string) $item['name'] : 'Item';
+            $qty = isset($item['quantity']) ? (int) $item['quantity'] : 0;
+            $total_raw = isset($item['total']) ? (string) $item['total'] : '0';
+            $total_value = is_numeric($total_raw) ? (float) $total_raw : 0.0;
+            $unit_price_value = $qty > 0 ? ($total_value / max(1, $qty)) : $total_value;
+            $sku = isset($item['sku']) ? (string) $item['sku'] : '';
+            $meta_lines = np_order_hub_format_meta_lines(isset($item['meta_data']) ? $item['meta_data'] : array());
+
+            echo '<tr>';
+            echo '<td>';
+            echo '<strong>' . esc_html($name) . '</strong>';
+            if (!empty($meta_lines)) {
+                echo '<ul style="margin:6px 0 0; padding-left:16px;">';
+                foreach ($meta_lines as $meta_line) {
+                    echo '<li>' . esc_html($meta_line) . '</li>';
+                }
+                echo '</ul>';
+            }
+            echo '</td>';
+            echo '<td><input type="number" min="0" name="line_items[' . esc_attr((string) $item_id) . '][quantity]" value="' . esc_attr((string) $qty) . '" style="width:90px;" /></td>';
+            echo '<td><input type="text" name="line_items[' . esc_attr((string) $item_id) . '][unit_price]" value="' . esc_attr(wc_format_decimal($unit_price_value, 2)) . '" style="width:110px;" /></td>';
+            echo '<td>' . esc_html(trim(number_format_i18n($total_value, 2) . ' ' . $currency)) . '</td>';
+            echo '<td>' . esc_html($sku) . '</td>';
+            echo '<td><label><input type="checkbox" name="line_items[' . esc_attr((string) $item_id) . '][remove]" value="1" /> Remove</label></td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+        echo '<p><button class="button" type="submit" name="np_order_hub_update_line_items" value="1">Save line items</button></p>';
+        echo '</form>';
+    }
+
+    echo '<h4 style="margin-top:20px;">Add product</h4>';
+    echo '<form method="post" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">';
+    wp_nonce_field('np_order_hub_search_product');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<div><label for="np-order-hub-product-search"><strong>Search</strong></label><br /><input id="np-order-hub-product-search" type="text" name="product_search_query" class="regular-text" value="' . esc_attr($product_search_query) . '" placeholder="Product name or SKU" /></div>';
+    echo '<div><button class="button" type="submit" name="np_order_hub_search_product" value="1">Search products</button></div>';
+    echo '</form>';
+
+    if (!empty($product_search_results)) {
+        echo '<form method="post" style="margin-top:12px; display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">';
+        wp_nonce_field('np_order_hub_add_line_item');
+        echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+        echo '<input type="hidden" name="product_search_query" value="' . esc_attr($product_search_query) . '" />';
+        echo '<div><label for="np-order-hub-product-selection"><strong>Product</strong></label><br /><select id="np-order-hub-product-selection" name="product_selection" style="min-width:380px;">';
+        foreach ($product_search_results as $result_item) {
+            if (!is_array($result_item)) {
+                continue;
+            }
+            $selection_value = np_order_hub_build_order_editor_product_selection_value($result_item);
+            $selection_label = (string) ($result_item['label'] ?? 'Product');
+            $price_label = isset($result_item['price']) && $result_item['price'] !== '' ? (' | ' . $result_item['price']) : '';
+            echo '<option value="' . esc_attr($selection_value) . '"' . selected($product_selection_value, $selection_value, false) . '>' . esc_html($selection_label . $price_label) . '</option>';
+        }
+        echo '</select></div>';
+        echo '<div><label for="np-order-hub-add-item-qty"><strong>Qty</strong></label><br /><input id="np-order-hub-add-item-qty" type="number" min="1" name="add_item_quantity" value="' . esc_attr((string) $add_item_quantity_value) . '" style="width:90px;" /></div>';
+        echo '<div><label for="np-order-hub-add-item-price"><strong>Unit price</strong></label><br /><input id="np-order-hub-add-item-price" type="text" name="add_item_unit_price" value="' . esc_attr($add_item_unit_price_value) . '" style="width:110px;" /></div>';
+        echo '<div><button class="button button-primary" type="submit" name="np_order_hub_add_line_item" value="1">Add product</button></div>';
+        echo '</form>';
+    }
+
+    echo '<h3 style="margin-top:24px;">Shipping</h3>';
+    echo '<form method="post">';
+    wp_nonce_field('np_order_hub_update_shipping');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    if (empty($shipping_lines)) {
+        echo '<p class="description">No shipping lines on this order.</p>';
+    } else {
+        echo '<table class="widefat striped" style="max-width:1100px;">';
+        echo '<thead><tr><th>Title</th><th>Method ID</th><th>Total</th><th>Remove</th></tr></thead><tbody>';
+        foreach ($shipping_lines as $shipping_line) {
+            if (!is_array($shipping_line)) {
+                continue;
+            }
+            $shipping_id = isset($shipping_line['id']) ? (int) $shipping_line['id'] : 0;
+            if ($shipping_id < 1) {
+                continue;
+            }
+            echo '<tr>';
+            echo '<td><input type="text" name="shipping_lines[' . esc_attr((string) $shipping_id) . '][method_title]" value="' . esc_attr((string) ($shipping_line['method_title'] ?? '')) . '" class="regular-text" /></td>';
+            echo '<td><input type="text" name="shipping_lines[' . esc_attr((string) $shipping_id) . '][method_id]" value="' . esc_attr((string) ($shipping_line['method_id'] ?? '')) . '" style="width:140px;" /></td>';
+            echo '<td><input type="text" name="shipping_lines[' . esc_attr((string) $shipping_id) . '][total]" value="' . esc_attr((string) ($shipping_line['total'] ?? '0')) . '" style="width:110px;" /></td>';
+            echo '<td><label><input type="checkbox" name="shipping_lines[' . esc_attr((string) $shipping_id) . '][remove]" value="1" /> Remove</label></td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+    }
+    echo '<h4 style="margin-top:16px;">Add shipping line</h4>';
+    echo '<div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">';
+    echo '<div><label><strong>Title</strong><br /><input type="text" name="new_shipping[method_title]" class="regular-text" value="' . esc_attr((string) $new_shipping_form['method_title']) . '" /></label></div>';
+    echo '<div><label><strong>Method ID</strong><br /><input type="text" name="new_shipping[method_id]" value="' . esc_attr((string) $new_shipping_form['method_id']) . '" style="width:140px;" /></label></div>';
+    echo '<div><label><strong>Total</strong><br /><input type="text" name="new_shipping[total]" value="' . esc_attr((string) $new_shipping_form['total']) . '" style="width:110px;" /></label></div>';
+    echo '</div>';
+    echo '<p><button class="button" type="submit" name="np_order_hub_update_shipping" value="1">Save shipping</button></p>';
+    echo '</form>';
+
+    echo '<h3 style="margin-top:24px;">Fees / discounts</h3>';
+    echo '<form method="post">';
+    wp_nonce_field('np_order_hub_update_fees');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    if (empty($fee_lines)) {
+        echo '<p class="description">No fee lines on this order.</p>';
+    } else {
+        echo '<table class="widefat striped" style="max-width:1100px;">';
+        echo '<thead><tr><th>Name</th><th>Amount</th><th>Remove</th></tr></thead><tbody>';
+        foreach ($fee_lines as $fee_line) {
+            if (!is_array($fee_line)) {
+                continue;
+            }
+            $fee_id = isset($fee_line['id']) ? (int) $fee_line['id'] : 0;
+            if ($fee_id < 1) {
+                continue;
+            }
+            echo '<tr>';
+            echo '<td><input type="text" name="fee_lines[' . esc_attr((string) $fee_id) . '][name]" class="regular-text" value="' . esc_attr((string) ($fee_line['name'] ?? '')) . '" /></td>';
+            echo '<td><input type="text" name="fee_lines[' . esc_attr((string) $fee_id) . '][amount]" value="' . esc_attr((string) ($fee_line['total'] ?? '0')) . '" style="width:110px;" /></td>';
+            echo '<td><label><input type="checkbox" name="fee_lines[' . esc_attr((string) $fee_id) . '][remove]" value="1" /> Remove</label></td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+    }
+    echo '<h4 style="margin-top:16px;">Add fee / discount</h4>';
+    echo '<p class="description">Use a negative amount for a discount.</p>';
+    echo '<div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">';
+    echo '<div><label><strong>Name</strong><br /><input type="text" name="new_fee[name]" class="regular-text" value="' . esc_attr((string) $new_fee_form['name']) . '" /></label></div>';
+    echo '<div><label><strong>Amount</strong><br /><input type="text" name="new_fee[amount]" value="' . esc_attr((string) $new_fee_form['amount']) . '" style="width:110px;" /></label></div>';
+    echo '</div>';
+    echo '<p><button class="button" type="submit" name="np_order_hub_update_fees" value="1">Save fees / discounts</button></p>';
+    echo '</form>';
+
+    echo '<form method="post" style="margin-top:12px;">';
+    wp_nonce_field('np_order_hub_recalculate_order');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<button class="button" type="submit" name="np_order_hub_recalculate_order" value="1">Recalculate totals</button>';
     echo '</form>';
 
     echo '<div style="display:flex; gap:32px; flex-wrap:wrap; align-items:flex-start; margin-top:24px;">';
