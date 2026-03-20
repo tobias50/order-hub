@@ -1066,6 +1066,33 @@ function np_order_hub_order_details_page() {
     echo '</form>';
     echo '</div>';
     echo '</div>';
+    echo '<div class="postbox">';
+    echo '<h2 class="hndle">Customer note</h2>';
+    echo '<div class="inside">';
+    echo '<form method="post">';
+    wp_nonce_field('np_order_hub_update_customer_note');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<textarea name="customer_note" rows="5" class="large-text">' . esc_textarea($customer_note_value) . '</textarea>';
+    echo '<p><button class="button" type="submit" name="np_order_hub_update_customer_note" value="1">Save customer note</button></p>';
+    echo '</form>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div class="postbox">';
+    echo '<h2 class="hndle">Order notes</h2>';
+    echo '<div class="inside">';
+    echo '<h3>Add note</h3>';
+    echo '<form method="post">';
+    wp_nonce_field('np_order_hub_add_order_note');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<textarea name="order_note" rows="5" class="large-text">' . esc_textarea($order_note_form_value) . '</textarea>';
+    echo '<p><button class="button" type="submit" name="np_order_hub_add_order_note" value="1">Add note</button></p>';
+    echo '</form>';
+    echo '<h3 style="margin-top:24px;">Recent notes</h3>';
+    np_order_hub_render_order_editor_notes_list($order_notes);
+    echo '</div>';
+    echo '</div>';
+
     echo '</div>';
 
     echo '<div id="postbox-container-2" class="postbox-container">';
@@ -1231,34 +1258,6 @@ function np_order_hub_order_details_page() {
     echo '</div>';
     echo '</div>';
 
-    echo '<div class="postbox">';
-    echo '<h2 class="hndle">Customer note</h2>';
-    echo '<div class="inside">';
-    echo '<form method="post">';
-    wp_nonce_field('np_order_hub_update_customer_note');
-    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
-    echo '<textarea name="customer_note" rows="5" class="large-text">' . esc_textarea($customer_note_value) . '</textarea>';
-    echo '<p><button class="button" type="submit" name="np_order_hub_update_customer_note" value="1">Save customer note</button></p>';
-    echo '</form>';
-    echo '</div>';
-    echo '</div>';
-
-    echo '<div class="postbox">';
-    echo '<h2 class="hndle">Order notes</h2>';
-    echo '<div class="inside">';
-    echo '<h3>Add note</h3>';
-    echo '<form method="post">';
-    wp_nonce_field('np_order_hub_add_order_note');
-    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
-    echo '<textarea name="order_note" rows="5" class="large-text">' . esc_textarea($order_note_form_value) . '</textarea>';
-    echo '<p><button class="button" type="submit" name="np_order_hub_add_order_note" value="1">Add note</button></p>';
-    echo '</form>';
-    echo '<h3 style="margin-top:24px;">Recent notes</h3>';
-    np_order_hub_render_order_editor_notes_list($order_notes);
-    echo '</div>';
-    echo '</div>';
-
-    echo '</div>';
     echo '</div>';
     echo '</div>';
     echo '</div>';
