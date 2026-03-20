@@ -279,11 +279,9 @@ function np_order_hub_wpo_update_order_items(WP_REST_Request $request) {
             return new WP_REST_Response(array('error' => 'Order item not found.'), 404);
         }
 
-        $remove = !empty($item_row['remove']);
         $quantity = isset($item_row['quantity']) ? absint($item_row['quantity']) : (int) $order_item->get_quantity();
-        if ($remove || $quantity < 1) {
-            $order->remove_item($item_id);
-            continue;
+        if ($quantity < 1) {
+            $quantity = 1;
         }
 
         $current_qty = max(1, (int) $order_item->get_quantity());
@@ -292,11 +290,7 @@ function np_order_hub_wpo_update_order_items(WP_REST_Request $request) {
         $current_subtotal_tax = (float) $order_item->get_subtotal_tax();
         $current_total_tax = (float) $order_item->get_total_tax();
         $current_taxes = $order_item->get_taxes();
-
-        $unit_price = np_order_hub_wpo_parse_decimal_input($item_row['unit_price'] ?? null, null);
-        if ($unit_price === null) {
-            $unit_price = $current_qty > 0 ? ($current_total / $current_qty) : 0.0;
-        }
+        $unit_price = $current_qty > 0 ? ($current_total / $current_qty) : 0.0;
         $new_subtotal = round($unit_price * $quantity, $precision);
         $new_total = round($unit_price * $quantity, $precision);
         $ratio = $current_subtotal != 0.0 ? ($new_subtotal / $current_subtotal) : ($quantity / max(1, $current_qty));
