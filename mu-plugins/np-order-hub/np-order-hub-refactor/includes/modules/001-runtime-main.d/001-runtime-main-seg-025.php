@@ -335,8 +335,7 @@ function np_order_hub_render_order_editor_notes_list($notes) {
         return;
     }
 
-    echo '<table class="widefat striped" style="max-width:1100px;">';
-    echo '<thead><tr><th>Date</th><th>Type</th><th>Author</th><th>Note</th></tr></thead><tbody>';
+    echo '<ul class="np-oh-order-notes">';
     foreach ($notes as $note) {
         if (!is_array($note)) {
             continue;
@@ -351,14 +350,16 @@ function np_order_hub_render_order_editor_notes_list($notes) {
             $author = !empty($note['added_by_user']) ? 'User' : 'System';
         }
         $message = trim((string) ($note['note'] ?? ''));
-        echo '<tr>';
-        echo '<td>' . esc_html($created_label) . '</td>';
-        echo '<td>' . esc_html($type) . '</td>';
-        echo '<td>' . esc_html($author) . '</td>';
-        echo '<td style="white-space:pre-wrap;">' . esc_html($message !== '' ? $message : '—') . '</td>';
-        echo '</tr>';
+        echo '<li class="np-oh-order-note">';
+        echo '<div class="np-oh-order-note-meta">';
+        echo '<strong>' . esc_html($type) . '</strong>';
+        echo '<span>' . esc_html($created_label) . '</span>';
+        echo '<span>' . esc_html($author) . '</span>';
+        echo '</div>';
+        echo '<div class="np-oh-order-note-body">' . esc_html($message !== '' ? $message : '—') . '</div>';
+        echo '</li>';
     }
-    echo '</tbody></table>';
+    echo '</ul>';
 }
 
 function np_order_hub_render_order_editor_styles() {
@@ -371,8 +372,6 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .postbox{margin:0 0 16px}
         .np-oh-editor-screen .postbox .hndle{margin:0;padding:11px 12px;border-bottom:1px solid #ccd0d4;font-size:13px;font-weight:600}
         .np-oh-editor-screen .inside{margin:0;padding:12px}
-        .np-oh-editor-screen .np-oh-order-overview{margin:8px 0 18px;color:#50575e}
-        .np-oh-editor-screen .np-oh-order-overview span{display:inline-block;margin:0 18px 6px 0}
         .np-oh-editor-screen .order_data_column_container{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
         .np-oh-editor-screen .order_data_column h3,
         .np-oh-editor-screen .np-oh-items-section h3,
@@ -391,6 +390,9 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .np-oh-items-table tfoot th,
         .np-oh-editor-screen .np-oh-items-table tfoot td{background:#fafafa}
         .np-oh-editor-screen .np-oh-items-section + .np-oh-items-section{margin-top:18px}
+        .np-oh-editor-screen .np-oh-items-table .column-cost,
+        .np-oh-editor-screen .np-oh-items-table .column-qty,
+        .np-oh-editor-screen .np-oh-items-table .column-total{width:110px}
         .np-oh-editor-screen .np-oh-sidebar-form + .np-oh-sidebar-form{margin-top:14px;padding-top:14px;border-top:1px solid #eee}
         .np-oh-editor-screen .np-oh-sidebar-actions .button{margin:0 8px 8px 0}
         .np-oh-editor-screen .np-oh-sidebar-actions select,
@@ -405,6 +407,10 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .large-text,
         .np-oh-editor-screen textarea,
         .np-oh-editor-screen select{max-width:100%}
+        .np-oh-editor-screen .np-oh-order-notes{margin:0;padding:0;list-style:none}
+        .np-oh-editor-screen .np-oh-order-note{margin:0 0 12px;padding:10px 12px;background:#f6f7f7;border:1px solid #dcdcde;border-radius:3px}
+        .np-oh-editor-screen .np-oh-order-note-meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;font-size:12px;color:#50575e}
+        .np-oh-editor-screen .np-oh-order-note-body{white-space:pre-wrap}
         @media (max-width: 1080px){
             .np-oh-editor-screen #post-body.columns-2{margin-right:0}
             .np-oh-editor-screen #postbox-container-1,
@@ -993,16 +999,6 @@ function np_order_hub_order_details_page() {
     np_order_hub_render_order_editor_styles();
     echo '<h1 class="wp-heading-inline">Edit order ' . esc_html($order_label) . '</h1>';
     echo '<a class="page-title-action" href="' . esc_url(admin_url('admin.php?page=np-order-hub')) . '">Back to hub</a>';
-    echo '<div class="np-oh-order-overview">';
-    echo '<span><strong>Store:</strong> ' . esc_html($record['store_name']) . '</span>';
-    if ($date_label !== '') {
-        echo '<span><strong>Created:</strong> ' . esc_html($date_label) . '</span>';
-    }
-    if ($status_label !== '') {
-        echo '<span><strong>Status:</strong> ' . esc_html($status_label) . '</span>';
-    }
-    echo '<span><strong>Total:</strong> ' . esc_html($total_display) . '</span>';
-    echo '</div>';
     echo '<div id="poststuff">';
     echo '<div id="post-body" class="metabox-holder columns-2">';
     echo '<div id="postbox-container-1" class="postbox-container">';
@@ -1124,7 +1120,7 @@ function np_order_hub_order_details_page() {
         wp_nonce_field('np_order_hub_update_line_items');
         echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
         echo '<table class="widefat striped np-oh-items-table">';
-        echo '<thead><tr><th>Product</th><th>Qty</th><th class="np-oh-amount">Total</th></tr></thead><tbody>';
+        echo '<thead><tr><th>Item</th><th class="column-cost np-oh-amount">Cost</th><th class="column-qty">Qty</th><th class="column-total np-oh-amount">Total</th></tr></thead><tbody>';
         foreach ($line_items as $item) {
             if (!is_array($item)) {
                 continue;
@@ -1136,10 +1132,12 @@ function np_order_hub_order_details_page() {
             $qty = isset($item['quantity']) ? (int) $item['quantity'] : 0;
             $total_raw = isset($item['total']) ? (string) $item['total'] : '0';
             $total_value = is_numeric($total_raw) ? (float) $total_raw : 0.0;
+            $unit_cost = $qty > 0 ? ($total_value / $qty) : $total_value;
             echo '<tr>';
             echo '<td>';
             np_order_hub_render_order_editor_item_summary($item);
             echo '</td>';
+            echo '<td class="np-oh-amount">' . esc_html(trim(number_format_i18n($unit_cost, 2) . ' ' . $currency)) . '</td>';
             echo '<td><input class="np-oh-qty-input" type="number" min="1" name="line_items[' . esc_attr((string) $item_id) . '][quantity]" value="' . esc_attr((string) max(1, $qty)) . '" /></td>';
             echo '<td class="np-oh-amount">' . esc_html(trim(number_format_i18n($total_value, 2) . ' ' . $currency)) . '</td>';
             echo '</tr>';
@@ -1234,11 +1232,8 @@ function np_order_hub_order_details_page() {
     echo '</div>';
 
     echo '<div class="postbox">';
-    echo '<h2 class="hndle">Order notes</h2>';
+    echo '<h2 class="hndle">Customer note</h2>';
     echo '<div class="inside">';
-    echo '<div class="np-oh-two-col np-oh-notes-grid">';
-    echo '<div>';
-    echo '<h3>Customer note</h3>';
     echo '<form method="post">';
     wp_nonce_field('np_order_hub_update_customer_note');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
@@ -1246,17 +1241,19 @@ function np_order_hub_order_details_page() {
     echo '<p><button class="button" type="submit" name="np_order_hub_update_customer_note" value="1">Save customer note</button></p>';
     echo '</form>';
     echo '</div>';
-    echo '<div>';
-    echo '<h3>Add internal note</h3>';
+    echo '</div>';
+
+    echo '<div class="postbox">';
+    echo '<h2 class="hndle">Order notes</h2>';
+    echo '<div class="inside">';
+    echo '<h3>Add note</h3>';
     echo '<form method="post">';
     wp_nonce_field('np_order_hub_add_order_note');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
     echo '<textarea name="order_note" rows="5" class="large-text">' . esc_textarea($order_note_form_value) . '</textarea>';
     echo '<p><button class="button" type="submit" name="np_order_hub_add_order_note" value="1">Add note</button></p>';
     echo '</form>';
-    echo '</div>';
-    echo '</div>';
-    echo '<h3 style="margin-top:24px;">Recent order notes</h3>';
+    echo '<h3 style="margin-top:24px;">Recent notes</h3>';
     np_order_hub_render_order_editor_notes_list($order_notes);
     echo '</div>';
     echo '</div>';
