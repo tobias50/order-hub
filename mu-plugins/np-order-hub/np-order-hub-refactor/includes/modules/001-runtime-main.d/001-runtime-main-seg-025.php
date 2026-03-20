@@ -92,6 +92,8 @@ function np_order_hub_help_scout_page() {
         $client_secret = sanitize_text_field((string) ($_POST['np_order_hub_help_scout_client_secret'] ?? ''));
         $webhook_secret = isset($_POST['np_order_hub_help_scout_webhook_secret']) ? trim((string) wp_unslash($_POST['np_order_hub_help_scout_webhook_secret'])) : '';
         $auto_lookup = !empty($_POST['np_order_hub_help_scout_auto_lookup']) ? 1 : 0;
+        $local_inbox = !empty($_POST['np_order_hub_help_scout_local_inbox']) ? 1 : 0;
+        $close_imported = !empty($_POST['np_order_hub_help_scout_close_imported']) ? 1 : 0;
 
         if ($token !== '') {
             update_option(NP_ORDER_HUB_HELP_SCOUT_TOKEN_OPTION, $token);
@@ -100,6 +102,8 @@ function np_order_hub_help_scout_page() {
         update_option(NP_ORDER_HUB_HELP_SCOUT_DEFAULT_STATUS_OPTION, $status);
         update_option(NP_ORDER_HUB_HELP_SCOUT_USER_OPTION, $user_id);
         update_option(NP_ORDER_HUB_HELP_SCOUT_AUTO_LOOKUP_OPTION, $auto_lookup);
+        update_option(NP_ORDER_HUB_HELP_SCOUT_LOCAL_INBOX_OPTION, $local_inbox);
+        update_option(NP_ORDER_HUB_HELP_SCOUT_CLOSE_IMPORTED_OPTION, $close_imported);
         if ($client_id !== '') {
             update_option(NP_ORDER_HUB_HELP_SCOUT_CLIENT_ID_OPTION, $client_id);
         }
@@ -171,7 +175,13 @@ function np_order_hub_help_scout_page() {
     echo '<td><input id="np-order-hub-help-scout-webhook-secret" name="np_order_hub_help_scout_webhook_secret" type="password" class="regular-text" value="" />';
     echo '<p class="description">Leave blank to keep current secret. Current secret: ' . ($settings['webhook_secret'] !== '' ? 'configured' : 'missing') . '.</p></td></tr>';
     echo '<tr><th scope="row"><label for="np-order-hub-help-scout-auto-lookup">Auto lookup</label></th>';
-    echo '<td><label><input id="np-order-hub-help-scout-auto-lookup" name="np_order_hub_help_scout_auto_lookup" type="checkbox" value="1"' . checked(!empty($settings['auto_lookup']), true, false) . ' /> Match innkommende Help Scout-samtaler mot ordre og legg inn intern note</label></td></tr>';
+    echo '<td><label><input id="np-order-hub-help-scout-auto-lookup" name="np_order_hub_help_scout_auto_lookup" type="checkbox" value="1"' . checked(!empty($settings['auto_lookup']), true, false) . ' /> Match innkommende Help Scout-samtaler mot ordre automatisk</label></td></tr>';
+    echo '<tr><th scope="row"><label for="np-order-hub-help-scout-local-inbox">Lokal saksinnboks</label></th>';
+    echo '<td><label><input id="np-order-hub-help-scout-local-inbox" name="np_order_hub_help_scout_local_inbox" type="checkbox" value="1"' . checked(!empty($settings['local_inbox']), true, false) . ' /> Lagre koblede Help Scout-samtaler som saker i Order Hub</label>';
+    echo '<p class="description">Når aktiv, opprettes lokale saker i Order Hub i stedet for at løsningen bare legger intern note i Help Scout.</p></td></tr>';
+    echo '<tr><th scope="row"><label for="np-order-hub-help-scout-close-imported">Lukk i Help Scout</label></th>';
+    echo '<td><label><input id="np-order-hub-help-scout-close-imported" name="np_order_hub_help_scout_close_imported" type="checkbox" value="1"' . checked(!empty($settings['close_imported']), true, false) . ' /> Lukk koblede samtaler i Help Scout etter import</label>';
+    echo '<p class="description">Anbefalt. Dette tar saken ut av aktiv Help Scout-kø, men beholder API-sporet slik at du fortsatt kan svare fra Order Hub.</p></td></tr>';
     echo '<tr><th scope="row"><label for="np-order-hub-help-scout-user">Sender user ID</label></th>';
     echo '<td><input id="np-order-hub-help-scout-user" name="np_order_hub_help_scout_user" type="number" class="small-text" value="' . esc_attr((string) $settings['user_id']) . '" />';
     echo '<p class="description">Required to send outbound email.</p></td></tr>';
@@ -609,6 +619,46 @@ function np_order_hub_order_details_page() {
     echo '<button class="button" type="submit" name="np_order_hub_delete_record" value="1" onclick="return confirm(\'Remove this order from the hub?\');">Delete from hub</button>';
     echo '</form>';
     echo '</div>';
+
+    $linked_cases = np_order_hub_help_scout_get_cases_for_record((int) $record['id']);
+    echo '<h2>Saker</h2>';
+    if (empty($linked_cases)) {
+        echo '<p>Ingen koblede saker for denne ordren.</p>';
+    } else {
+        echo '<table class="widefat striped" style="max-width: 1100px; margin-bottom: 18px;">';
+        echo '<thead><tr>';
+        echo '<th>Emne</th>';
+        echo '<th>Kunde</th>';
+        echo '<th>Status</th>';
+        echo '<th>Sist oppdatert</th>';
+        echo '<th>Handlinger</th>';
+        echo '</tr></thead><tbody>';
+        foreach ($linked_cases as $case) {
+            $case_id = isset($case['id']) ? (int) $case['id'] : 0;
+            $case_subject = trim((string) ($case['subject'] ?? ''));
+            $case_customer = trim((string) (($case['customer_name'] ?? '') ?: ($case['customer_email'] ?? '')));
+            $case_status = np_order_hub_help_scout_case_status_label((string) ($case['remote_status'] ?? ''));
+            $case_last_thread = trim((string) ($case['last_thread_at_gmt'] ?? ''));
+            $case_last_thread_label = $case_last_thread !== '' && $case_last_thread !== '0000-00-00 00:00:00'
+                ? get_date_from_gmt($case_last_thread, 'd.m.Y H:i')
+                : '—';
+            $case_details_url = admin_url('admin.php?page=np-order-hub-case-details&case_id=' . $case_id);
+            $case_remote_url = trim((string) ($case['remote_web_url'] ?? ''));
+
+            echo '<tr>';
+            echo '<td>' . esc_html($case_subject !== '' ? $case_subject : '(uten emne)') . '</td>';
+            echo '<td>' . esc_html($case_customer !== '' ? $case_customer : 'Ukjent') . '</td>';
+            echo '<td>' . esc_html($case_status) . '</td>';
+            echo '<td>' . esc_html($case_last_thread_label) . '</td>';
+            echo '<td><a class="button button-small" href="' . esc_url($case_details_url) . '">Åpne sak</a> ';
+            if ($case_remote_url !== '') {
+                echo '<a class="button button-small" href="' . esc_url($case_remote_url) . '" target="_blank" rel="noopener">Help Scout</a>';
+            }
+            echo '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+    }
 
     $help_scout_settings = np_order_hub_get_help_scout_settings();
     $help_scout_subject_default = 'Order ' . $order_label;

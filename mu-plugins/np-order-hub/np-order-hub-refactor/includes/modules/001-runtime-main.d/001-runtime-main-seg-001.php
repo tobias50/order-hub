@@ -2,7 +2,7 @@
 /**
  * Plugin Name: NP Order Hub
  * Description: Collect orders from multiple WooCommerce stores and display a central list.
- * Version: 0.2.2
+ * Version: 0.2.3
  * Author: Nordicprofil
  */
 
@@ -10,7 +10,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('NP_ORDER_HUB_VERSION', '0.2.2');
+define('NP_ORDER_HUB_VERSION', '0.2.3');
 
 define('NP_ORDER_HUB_OPTION_STORES', 'np_order_hub_stores');
 
@@ -40,6 +40,8 @@ define('NP_ORDER_HUB_HELP_SCOUT_REFRESH_TOKEN_OPTION', 'np_order_hub_help_scout_
 define('NP_ORDER_HUB_HELP_SCOUT_EXPIRES_AT_OPTION', 'np_order_hub_help_scout_expires_at');
 define('NP_ORDER_HUB_HELP_SCOUT_WEBHOOK_SECRET_OPTION', 'np_order_hub_help_scout_webhook_secret');
 define('NP_ORDER_HUB_HELP_SCOUT_AUTO_LOOKUP_OPTION', 'np_order_hub_help_scout_auto_lookup');
+define('NP_ORDER_HUB_HELP_SCOUT_LOCAL_INBOX_OPTION', 'np_order_hub_help_scout_local_inbox');
+define('NP_ORDER_HUB_HELP_SCOUT_CLOSE_IMPORTED_OPTION', 'np_order_hub_help_scout_close_imported');
 define('NP_ORDER_HUB_CONNECTOR_SETUP_KEY_OPTION', 'np_order_hub_connector_setup_key');
 define('NP_ORDER_HUB_PRINT_QUEUE_OPTION', 'np_order_hub_print_queue_jobs');
 define('NP_ORDER_HUB_PRINT_QUEUE_EVENT', 'np_order_hub_process_print_job');
@@ -114,10 +116,28 @@ function np_order_hub_production_error_table_name() {
     return $wpdb->prefix . 'np_order_hub_production_errors';
 }
 
+function np_order_hub_help_scout_cases_table_name() {
+    global $wpdb;
+    return $wpdb->prefix . 'np_order_hub_help_scout_cases';
+}
+
+function np_order_hub_help_scout_messages_table_name() {
+    global $wpdb;
+    return $wpdb->prefix . 'np_order_hub_help_scout_messages';
+}
+
+function np_order_hub_help_scout_case_links_table_name() {
+    global $wpdb;
+    return $wpdb->prefix . 'np_order_hub_help_scout_case_links';
+}
+
 function np_order_hub_activate() {
     global $wpdb;
     $table = np_order_hub_table_name();
     $production_table = np_order_hub_production_error_table_name();
+    $help_scout_cases_table = np_order_hub_help_scout_cases_table_name();
+    $help_scout_messages_table = np_order_hub_help_scout_messages_table_name();
+    $help_scout_links_table = np_order_hub_help_scout_case_links_table_name();
     $charset_collate = $wpdb->get_charset_collate();
 
     $sql = "CREATE TABLE $table (
@@ -172,9 +192,68 @@ function np_order_hub_activate() {
 	        KEY error_type (error_type)
 	    ) $charset_collate;";
 
+    $help_scout_cases_sql = "CREATE TABLE $help_scout_cases_table (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        conversation_id BIGINT(20) UNSIGNED NOT NULL,
+        conversation_number BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        mailbox_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        subject VARCHAR(255) NOT NULL DEFAULT '',
+        preview TEXT NULL,
+        customer_name VARCHAR(191) NOT NULL DEFAULT '',
+        customer_email VARCHAR(191) NOT NULL DEFAULT '',
+        remote_status VARCHAR(40) NOT NULL DEFAULT '',
+        remote_web_url TEXT NULL,
+        primary_record_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        last_thread_at_gmt DATETIME NULL,
+        last_customer_thread_at_gmt DATETIME NULL,
+        last_synced_gmt DATETIME NOT NULL,
+        imported_at_gmt DATETIME NOT NULL,
+        updated_at_gmt DATETIME NOT NULL,
+        closed_in_help_scout TINYINT(1) NOT NULL DEFAULT 0,
+        payload LONGTEXT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY conversation_id (conversation_id),
+        KEY primary_record_id (primary_record_id),
+        KEY remote_status (remote_status),
+        KEY last_thread_at_gmt (last_thread_at_gmt),
+        KEY customer_email (customer_email)
+    ) $charset_collate;";
+
+    $help_scout_messages_sql = "CREATE TABLE $help_scout_messages_table (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        case_id BIGINT(20) UNSIGNED NOT NULL,
+        conversation_id BIGINT(20) UNSIGNED NOT NULL,
+        thread_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        thread_type VARCHAR(40) NOT NULL DEFAULT '',
+        thread_status VARCHAR(40) NOT NULL DEFAULT '',
+        author_name VARCHAR(191) NOT NULL DEFAULT '',
+        author_email VARCHAR(191) NOT NULL DEFAULT '',
+        body LONGTEXT NULL,
+        created_at_gmt DATETIME NULL,
+        payload LONGTEXT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY conversation_thread (conversation_id, thread_id),
+        KEY case_id (case_id),
+        KEY created_at_gmt (created_at_gmt),
+        KEY thread_type (thread_type)
+    ) $charset_collate;";
+
+    $help_scout_links_sql = "CREATE TABLE $help_scout_links_table (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        case_id BIGINT(20) UNSIGNED NOT NULL,
+        record_id BIGINT(20) UNSIGNED NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY case_record (case_id, record_id),
+        KEY record_id (record_id),
+        KEY case_id (case_id)
+    ) $charset_collate;";
+
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
     dbDelta($sql);
     dbDelta($production_sql);
+    dbDelta($help_scout_cases_sql);
+    dbDelta($help_scout_messages_sql);
+    dbDelta($help_scout_links_sql);
 }
 
 $np_order_hub_main_file = defined('NP_ORDER_HUB_MAIN_FILE') ? NP_ORDER_HUB_MAIN_FILE : __FILE__;
@@ -213,6 +292,36 @@ function np_order_hub_ensure_production_error_table() {
 	    if ($has_error_type_index === '') {
 	        $wpdb->query("ALTER TABLE `{$table_sql}` ADD KEY error_type (error_type)");
 	    }
+}
+
+function np_order_hub_ensure_help_scout_case_tables() {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    global $wpdb;
+    if (!isset($wpdb) || !($wpdb instanceof wpdb)) {
+        return;
+    }
+
+    $tables = array(
+        np_order_hub_help_scout_cases_table_name(),
+        np_order_hub_help_scout_messages_table_name(),
+        np_order_hub_help_scout_case_links_table_name(),
+    );
+
+    foreach ($tables as $table) {
+        if ($table === '') {
+            return;
+        }
+        $exists = (string) $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+        if ($exists !== $table) {
+            np_order_hub_activate();
+            return;
+        }
+    }
 }
 
 function np_order_hub_get_production_error_type_options() {

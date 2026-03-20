@@ -52,6 +52,8 @@ function np_order_hub_get_help_scout_settings() {
         'expires_at' => (int) get_option(NP_ORDER_HUB_HELP_SCOUT_EXPIRES_AT_OPTION, 0),
         'webhook_secret' => trim((string) get_option(NP_ORDER_HUB_HELP_SCOUT_WEBHOOK_SECRET_OPTION, '')),
         'auto_lookup' => (int) get_option(NP_ORDER_HUB_HELP_SCOUT_AUTO_LOOKUP_OPTION, 1),
+        'local_inbox' => (int) get_option(NP_ORDER_HUB_HELP_SCOUT_LOCAL_INBOX_OPTION, 1),
+        'close_imported' => (int) get_option(NP_ORDER_HUB_HELP_SCOUT_CLOSE_IMPORTED_OPTION, 1),
     );
 }
 

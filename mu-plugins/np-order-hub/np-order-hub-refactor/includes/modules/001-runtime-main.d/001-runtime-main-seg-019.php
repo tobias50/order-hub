@@ -191,14 +191,35 @@ function np_order_hub_handle_help_scout_webhook(WP_REST_Request $request) {
         return new WP_REST_Response(array('status' => 'mailbox_mismatch'), 200);
     }
 
+    $existing_case = np_order_hub_help_scout_get_case_by_conversation_id($conversation_id);
     $customer = np_order_hub_help_scout_extract_customer($conversation, $payload);
-    if (empty($customer['email']) && empty($customer['full_name']) && empty($customer['first_name'])) {
+    if (!$existing_case && empty($customer['email']) && empty($customer['full_name']) && empty($customer['first_name'])) {
         return new WP_REST_Response(array('status' => 'missing_customer'), 200);
     }
 
     $matches = np_order_hub_help_scout_find_matching_orders($customer, 8);
-    if (empty($matches)) {
+    if (empty($matches) && !$existing_case) {
         return new WP_REST_Response(array('status' => 'no_matches'), 200);
+    }
+
+    if (!empty($settings['local_inbox'])) {
+        $close_remote = !empty($settings['close_imported']) && sanitize_key((string) ($conversation['status'] ?? '')) !== 'closed';
+        $case = np_order_hub_help_scout_sync_conversation_to_local($settings, $conversation_id, $matches, $close_remote);
+        if (is_wp_error($case)) {
+            error_log('[np-order-hub] help_scout_local_import_failed ' . wp_json_encode(array(
+                'conversation_id' => $conversation_id,
+                'message' => $case->get_error_message(),
+            )));
+            return new WP_REST_Response(array('status' => 'local_import_failed'), 200);
+        }
+
+        return new WP_REST_Response(array(
+            'status' => 'imported',
+            'conversation_id' => $conversation_id,
+            'case_id' => isset($case['id']) ? (int) $case['id'] : 0,
+            'matches' => count($matches),
+            'closed_in_help_scout' => !empty($close_remote),
+        ), 200);
     }
 
     $note = np_order_hub_help_scout_build_match_note($customer, $matches);

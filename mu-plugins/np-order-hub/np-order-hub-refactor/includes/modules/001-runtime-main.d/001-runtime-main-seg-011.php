@@ -284,8 +284,10 @@ function np_order_hub_admin_menu() {
     add_submenu_page('np-order-hub', 'Stores', 'Stores', $capability, 'np-order-hub-stores', 'np_order_hub_stores_page');
     add_submenu_page('np-order-hub', 'Varsler', 'Varsler', $capability, 'np-order-hub-notifications', 'np_order_hub_notifications_page');
     add_submenu_page('np-order-hub', 'Help Scout', 'Help Scout', $capability, 'np-order-hub-help-scout', 'np_order_hub_help_scout_page');
+    add_submenu_page('np-order-hub', 'Saker', 'Saker', $capability, 'np-order-hub-cases', 'np_order_hub_help_scout_cases_page');
     add_submenu_page('np-order-hub', 'Debug', 'Debug', $capability, 'np-order-hub-debug', 'np_order_hub_debug_page');
     add_submenu_page(null, 'Order Details', 'Order Details', $capability, 'np-order-hub-details', 'np_order_hub_order_details_page');
+    add_submenu_page(null, 'Case Details', 'Case Details', $capability, 'np-order-hub-case-details', 'np_order_hub_help_scout_case_details_page');
 }
 
 function np_order_hub_orders_page() {

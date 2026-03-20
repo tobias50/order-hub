@@ -72,12 +72,35 @@ function np_order_hub_help_scout_send_reply($settings, $conversation_id, $messag
             'id' => (int) $settings['user_id'],
         );
     }
-
     return np_order_hub_help_scout_request(
         $settings,
         'POST',
         'conversations/' . (int) $conversation_id . '/reply',
         $payload
+    );
+}
+
+function np_order_hub_help_scout_update_conversation_status($settings, $conversation_id, $status) {
+    $conversation_id = absint($conversation_id);
+    $status = sanitize_key((string) $status);
+    if ($conversation_id < 1) {
+        return new WP_Error('missing_help_scout_conversation', 'Help Scout conversation ID missing.');
+    }
+    if (!in_array($status, array('active', 'pending', 'closed'), true)) {
+        return new WP_Error('invalid_help_scout_status', 'Invalid Help Scout status.');
+    }
+
+    return np_order_hub_help_scout_request(
+        $settings,
+        'PATCH',
+        'conversations/' . $conversation_id,
+        array(
+            array(
+                'op' => 'replace',
+                'path' => '/status',
+                'value' => $status,
+            ),
+        )
     );
 }
 
