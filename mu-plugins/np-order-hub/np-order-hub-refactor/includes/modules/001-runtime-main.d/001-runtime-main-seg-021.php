@@ -269,13 +269,11 @@ function np_order_hub_update_remote_order_status($store, $order_id, $status) {
 
     $code = wp_remote_retrieve_response_code($response);
     $body = wp_remote_retrieve_body($response);
+    $decoded = $body !== '' ? json_decode($body, true) : null;
     if ($code < 200 || $code >= 300) {
         $message = 'Status update failed.';
-        if ($body !== '') {
-            $decoded = json_decode($body, true);
-            if (is_array($decoded) && !empty($decoded['error'])) {
-                $message = (string) $decoded['error'];
-            }
+        if (is_array($decoded) && !empty($decoded['error'])) {
+            $message = (string) $decoded['error'];
         }
         return new WP_Error('status_update_failed', $message, array(
             'status' => $code,
@@ -283,5 +281,5 @@ function np_order_hub_update_remote_order_status($store, $order_id, $status) {
         ));
     }
 
-    return true;
+    return is_array($decoded) ? $decoded : true;
 }

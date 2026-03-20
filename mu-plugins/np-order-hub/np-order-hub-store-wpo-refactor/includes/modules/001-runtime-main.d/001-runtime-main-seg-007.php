@@ -232,7 +232,7 @@ function np_order_hub_wpo_update_order_status(WP_REST_Request $request) {
     if (!$order) {
         return new WP_REST_Response(array('error' => 'order_not_found'), 404);
     }
-    $allowed = array('pending', 'processing', 'restordre', 'completed', 'on-hold', 'cancelled', 'refunded', 'reklamasjon', 'failed');
+    $allowed = array('pending', 'processing', 'restordre', 'bytte-storrelse', 'completed', 'on-hold', 'cancelled', 'refunded', 'reklamasjon', 'failed');
     if (!in_array($status, $allowed, true)) {
         return new WP_REST_Response(array('error' => 'invalid_status'), 400);
     }
@@ -241,6 +241,9 @@ function np_order_hub_wpo_update_order_status(WP_REST_Request $request) {
         'status' => 'ok',
         'order_id' => $order_id,
         'new_status' => $status,
+        'order' => function_exists('np_order_hub_wpo_get_live_order_payload')
+            ? np_order_hub_wpo_get_live_order_payload($order)
+            : np_order_hub_wpo_export_order_payload($order),
     ), 200);
 }
 

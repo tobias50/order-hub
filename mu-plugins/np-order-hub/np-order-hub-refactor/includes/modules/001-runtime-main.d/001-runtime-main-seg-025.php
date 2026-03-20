@@ -254,6 +254,113 @@ function np_order_hub_format_meta_lines($meta_data) {
     return $lines;
 }
 
+function np_order_hub_sanitize_order_editor_address_input($raw, $type) {
+    $raw = is_array($raw) ? $raw : array();
+    $type = $type === 'shipping' ? 'shipping' : 'billing';
+    $fields = array(
+        'first_name',
+        'last_name',
+        'company',
+        'address_1',
+        'address_2',
+        'postcode',
+        'city',
+        'state',
+        'country',
+    );
+    if ($type === 'billing') {
+        $fields[] = 'email';
+        $fields[] = 'phone';
+    }
+    if ($type === 'shipping') {
+        $fields[] = 'phone';
+    }
+
+    $sanitized = array();
+    foreach ($fields as $field) {
+        if (!array_key_exists($field, $raw)) {
+            continue;
+        }
+        $value = is_scalar($raw[$field]) ? (string) $raw[$field] : '';
+        if ($field === 'email') {
+            $sanitized[$field] = sanitize_email($value);
+        } elseif ($field === 'country') {
+            $sanitized[$field] = strtoupper(sanitize_text_field($value));
+        } else {
+            $sanitized[$field] = sanitize_text_field($value);
+        }
+    }
+
+    return $sanitized;
+}
+
+function np_order_hub_render_order_editor_address_fields($prefix, $values, $type) {
+    $values = is_array($values) ? $values : array();
+    $type = $type === 'shipping' ? 'shipping' : 'billing';
+    $fields = array(
+        'first_name' => 'First name',
+        'last_name' => 'Last name',
+        'company' => 'Company',
+        'address_1' => 'Address line 1',
+        'address_2' => 'Address line 2',
+        'postcode' => 'Postcode',
+        'city' => 'City',
+        'state' => 'State / county',
+        'country' => 'Country',
+    );
+    if ($type === 'billing') {
+        $fields['email'] = 'Email';
+        $fields['phone'] = 'Phone';
+    } else {
+        $fields['phone'] = 'Phone';
+    }
+
+    echo '<table class="form-table" style="margin-top:0;">';
+    foreach ($fields as $field => $label) {
+        $field_id = 'np-order-hub-' . esc_attr($prefix . '-' . $field);
+        $name = 'order_' . $prefix . '[' . $field . ']';
+        $value = isset($values[$field]) ? (string) $values[$field] : '';
+        echo '<tr>';
+        echo '<th scope="row"><label for="' . $field_id . '">' . esc_html($label) . '</label></th>';
+        echo '<td><input id="' . $field_id . '" name="' . esc_attr($name) . '" type="text" class="regular-text" value="' . esc_attr($value) . '" /></td>';
+        echo '</tr>';
+    }
+    echo '</table>';
+}
+
+function np_order_hub_render_order_editor_notes_list($notes) {
+    $notes = is_array($notes) ? $notes : array();
+    if (empty($notes)) {
+        echo '<p class="description">No recent order notes found.</p>';
+        return;
+    }
+
+    echo '<table class="widefat striped" style="max-width:1100px;">';
+    echo '<thead><tr><th>Date</th><th>Type</th><th>Author</th><th>Note</th></tr></thead><tbody>';
+    foreach ($notes as $note) {
+        if (!is_array($note)) {
+            continue;
+        }
+        $created = trim((string) ($note['date_created_gmt'] ?? ''));
+        $created_label = $created !== '' && $created !== '0000-00-00 00:00:00'
+            ? get_date_from_gmt($created, 'd.m.Y H:i')
+            : '—';
+        $type = !empty($note['is_customer_note']) ? 'Customer note' : 'Internal';
+        $author = trim((string) ($note['added_by'] ?? ''));
+        if ($author === '') {
+            $author = !empty($note['added_by_user']) ? 'User' : 'System';
+        }
+        $message = trim((string) ($note['note'] ?? ''));
+        echo '<tr>';
+        echo '<td>' . esc_html($created_label) . '</td>';
+        echo '<td>' . esc_html($type) . '</td>';
+        echo '<td>' . esc_html($author) . '</td>';
+        echo '<td style="white-space:pre-wrap;">' . esc_html($message !== '' ? $message : '—') . '</td>';
+        echo '</tr>';
+    }
+    echo '</tbody></table>';
+}
+
 function np_order_hub_order_details_page() {
     if (!current_user_can('manage_options')) {
         return;
@@ -282,18 +389,24 @@ function np_order_hub_order_details_page() {
         );
     }
 
-    $payload = array();
-    if ($record && !empty($record['payload'])) {
-        $decoded = json_decode($record['payload'], true);
-        if (is_array($decoded)) {
-            $payload = $decoded;
-        }
-    }
-    $line_items = isset($payload['line_items']) && is_array($payload['line_items']) ? $payload['line_items'] : array();
-    $help_scout_billing = isset($payload['billing']) && is_array($payload['billing']) ? $payload['billing'] : array();
+    $store = $record ? np_order_hub_get_store_by_key(isset($record['store_key']) ? $record['store_key'] : '') : null;
+    $payload = np_order_hub_get_record_payload_data($record);
+    $live_order_notice = null;
+    $live_order = $payload;
+    $live_billing = isset($live_order['billing']) && is_array($live_order['billing']) ? $live_order['billing'] : array();
+    $live_shipping = isset($live_order['shipping']) && is_array($live_order['shipping']) ? $live_order['shipping'] : array();
+    $order_notes = isset($live_order['order_notes']) && is_array($live_order['order_notes']) ? $live_order['order_notes'] : array();
+    $email_actions = isset($live_order['email_actions']) && is_array($live_order['email_actions']) && !empty($live_order['email_actions'])
+        ? $live_order['email_actions']
+        : np_order_hub_get_supported_order_email_actions();
+    $line_items = isset($live_order['line_items']) && is_array($live_order['line_items']) ? $live_order['line_items'] : array();
+    $help_scout_billing = $live_billing;
     $help_scout_email = !empty($help_scout_billing['email']) ? sanitize_email((string) $help_scout_billing['email']) : '';
     $help_scout_first_name = !empty($help_scout_billing['first_name']) ? sanitize_text_field((string) $help_scout_billing['first_name']) : '';
     $help_scout_last_name = !empty($help_scout_billing['last_name']) ? sanitize_text_field((string) $help_scout_billing['last_name']) : '';
+    $customer_note_value = isset($live_order['customer_note']) ? (string) $live_order['customer_note'] : '';
+    $order_note_form_value = '';
+    $order_email_action_value = 'customer_processing_order';
 
     $help_scout_notice = null;
     $help_scout_form = array(
@@ -385,6 +498,68 @@ function np_order_hub_order_details_page() {
         }
     }
 
+    if ($record && !empty($_POST['np_order_hub_refresh_live_order'])) {
+        check_admin_referer('np_order_hub_refresh_live_order');
+        $result = np_order_hub_fetch_remote_order_live($store, (int) $record['order_id']);
+        if (is_wp_error($result)) {
+            $live_order_notice = array('type' => 'error', 'message' => $result->get_error_message());
+        } elseif (is_array($result) && !empty($result['order']) && is_array($result['order'])) {
+            $record = np_order_hub_upsert_record_from_remote_payload($record, $store, $result['order']);
+            $live_order_notice = array('type' => 'success', 'message' => 'Live order data refreshed.');
+        }
+    }
+
+    if ($record && !empty($_POST['np_order_hub_update_addresses'])) {
+        check_admin_referer('np_order_hub_update_addresses');
+        $billing_input = np_order_hub_sanitize_order_editor_address_input($_POST['order_billing'] ?? array(), 'billing');
+        $shipping_input = np_order_hub_sanitize_order_editor_address_input($_POST['order_shipping'] ?? array(), 'shipping');
+        $result = np_order_hub_update_remote_order_addresses($store, (int) $record['order_id'], $billing_input, $shipping_input);
+        if (is_wp_error($result)) {
+            $live_order_notice = array('type' => 'error', 'message' => $result->get_error_message());
+        } elseif (is_array($result) && !empty($result['order']) && is_array($result['order'])) {
+            $record = np_order_hub_upsert_record_from_remote_payload($record, $store, $result['order']);
+            $live_order_notice = array('type' => 'success', 'message' => 'Addresses updated.');
+        }
+    }
+
+    if ($record && !empty($_POST['np_order_hub_add_order_note'])) {
+        check_admin_referer('np_order_hub_add_order_note');
+        $order_note_form_value = sanitize_textarea_field((string) ($_POST['order_note'] ?? ''));
+        $result = np_order_hub_add_remote_order_note($store, (int) $record['order_id'], $order_note_form_value);
+        if (is_wp_error($result)) {
+            $live_order_notice = array('type' => 'error', 'message' => $result->get_error_message());
+        } elseif (is_array($result) && !empty($result['order']) && is_array($result['order'])) {
+            $record = np_order_hub_upsert_record_from_remote_payload($record, $store, $result['order']);
+            $live_order_notice = array('type' => 'success', 'message' => 'Order note added.');
+            $order_note_form_value = '';
+        }
+    }
+
+    if ($record && !empty($_POST['np_order_hub_update_customer_note'])) {
+        check_admin_referer('np_order_hub_update_customer_note');
+        $customer_note_value = sanitize_textarea_field((string) ($_POST['customer_note'] ?? ''));
+        $result = np_order_hub_update_remote_customer_note($store, (int) $record['order_id'], $customer_note_value);
+        if (is_wp_error($result)) {
+            $live_order_notice = array('type' => 'error', 'message' => $result->get_error_message());
+        } elseif (is_array($result) && !empty($result['order']) && is_array($result['order'])) {
+            $record = np_order_hub_upsert_record_from_remote_payload($record, $store, $result['order']);
+            $live_order_notice = array('type' => 'success', 'message' => 'Customer note updated.');
+        }
+    }
+
+    if ($record && !empty($_POST['np_order_hub_send_order_email'])) {
+        check_admin_referer('np_order_hub_send_order_email');
+        $order_email_action_value = sanitize_key((string) ($_POST['order_email_action'] ?? ''));
+        $result = np_order_hub_send_remote_order_email($store, (int) $record['order_id'], $order_email_action_value);
+        if (is_wp_error($result)) {
+            $live_order_notice = array('type' => 'error', 'message' => $result->get_error_message());
+        } elseif (is_array($result) && !empty($result['order']) && is_array($result['order'])) {
+            $record = np_order_hub_upsert_record_from_remote_payload($record, $store, $result['order']);
+            $label = $email_actions[$order_email_action_value] ?? $order_email_action_value;
+            $live_order_notice = array('type' => 'success', 'message' => 'Sent Woo email: ' . $label . '.');
+        }
+    }
+
     $status_notice = null;
     if ($record && !empty($_POST['np_order_hub_update_status'])) {
         check_admin_referer('np_order_hub_update_status');
@@ -393,12 +568,15 @@ function np_order_hub_order_details_page() {
         if (!isset($allowed_statuses[$new_status])) {
             $status_notice = array('type' => 'error', 'message' => 'Invalid status selected.');
         } else {
-            $store = np_order_hub_get_store_by_key(isset($record['store_key']) ? $record['store_key'] : '');
             $result = np_order_hub_update_remote_order_status($store, (int) $record['order_id'], $new_status);
             if (is_wp_error($result)) {
                 $status_notice = array('type' => 'error', 'message' => $result->get_error_message());
             } else {
-                $record = np_order_hub_apply_local_status($record, $new_status);
+                if (is_array($result) && !empty($result['order']) && is_array($result['order'])) {
+                    $record = np_order_hub_upsert_record_from_remote_payload($record, $store, $result['order']);
+                } else {
+                    $record = np_order_hub_apply_local_status($record, $new_status);
+                }
                 $status_notice = array('type' => 'success', 'message' => 'Order status updated.');
             }
         }
@@ -495,6 +673,28 @@ function np_order_hub_order_details_page() {
         }
     }
 
+    if ($record && $store && np_order_hub_get_store_token($store) !== '') {
+        $live_result = np_order_hub_fetch_remote_order_live($store, (int) $record['order_id']);
+        if (!is_wp_error($live_result) && is_array($live_result) && !empty($live_result['order']) && is_array($live_result['order'])) {
+            $record = np_order_hub_upsert_record_from_remote_payload($record, $store, $live_result['order']);
+        }
+    }
+
+    $payload = np_order_hub_get_record_payload_data($record);
+    $live_order = $payload;
+    $live_billing = isset($live_order['billing']) && is_array($live_order['billing']) ? $live_order['billing'] : array();
+    $live_shipping = isset($live_order['shipping']) && is_array($live_order['shipping']) ? $live_order['shipping'] : array();
+    $order_notes = isset($live_order['order_notes']) && is_array($live_order['order_notes']) ? $live_order['order_notes'] : array();
+    $email_actions = isset($live_order['email_actions']) && is_array($live_order['email_actions']) && !empty($live_order['email_actions'])
+        ? $live_order['email_actions']
+        : np_order_hub_get_supported_order_email_actions();
+    $line_items = isset($live_order['line_items']) && is_array($live_order['line_items']) ? $live_order['line_items'] : array();
+    $help_scout_billing = $live_billing;
+    $help_scout_email = !empty($help_scout_billing['email']) ? sanitize_email((string) $help_scout_billing['email']) : '';
+    $help_scout_first_name = !empty($help_scout_billing['first_name']) ? sanitize_text_field((string) $help_scout_billing['first_name']) : '';
+    $help_scout_last_name = !empty($help_scout_billing['last_name']) ? sanitize_text_field((string) $help_scout_billing['last_name']) : '';
+    $customer_note_value = isset($live_order['customer_note']) ? (string) $live_order['customer_note'] : $customer_note_value;
+
     echo '<div class="wrap">';
     echo '<h1>Order Details</h1>';
     echo '<p><a href="' . esc_url(admin_url('admin.php?page=np-order-hub')) . '">&larr; Back to orders</a></p>';
@@ -539,6 +739,14 @@ function np_order_hub_order_details_page() {
         }
     }
 
+    if (!empty($live_order_notice) && is_array($live_order_notice)) {
+        $type = $live_order_notice['type'] === 'success' ? 'updated' : 'error';
+        $message = isset($live_order_notice['message']) ? (string) $live_order_notice['message'] : '';
+        if ($message !== '') {
+            echo '<div class="' . esc_attr($type) . '"><p>' . esc_html($message) . '</p></div>';
+        }
+    }
+
     if (!$record) {
         echo '<div class="error"><p>Order not found.</p></div>';
         echo '</div>';
@@ -564,7 +772,13 @@ function np_order_hub_order_details_page() {
     if ($status_label !== '') {
         echo '<p><strong>Status:</strong> ' . esc_html($status_label) . '</p>';
     }
-    $store = np_order_hub_get_store_by_key(isset($record['store_key']) ? $record['store_key'] : '');
+    $modified_label = '';
+    if (!empty($record['date_modified_gmt']) && $record['date_modified_gmt'] !== '0000-00-00 00:00:00') {
+        $modified_label = get_date_from_gmt($record['date_modified_gmt'], 'd.m.Y H:i');
+    }
+    if ($modified_label !== '') {
+        echo '<p><strong>Live synced:</strong> ' . esc_html($modified_label) . '</p>';
+    }
     $allowed_statuses = np_order_hub_get_allowed_statuses();
     if (!empty($allowed_statuses)) {
         $token_missing = np_order_hub_get_store_token($store) === '';
@@ -613,11 +827,87 @@ function np_order_hub_order_details_page() {
         }
         echo '</p>';
     }
+    echo '<form method="post" style="display:inline-block; margin-right:8px;">';
+    wp_nonce_field('np_order_hub_refresh_live_order');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<button class="button" type="submit" name="np_order_hub_refresh_live_order" value="1">Refresh live data</button>';
+    echo '</form>';
     echo '<form method="post" style="margin-top:10px;">';
     wp_nonce_field('np_order_hub_delete_record');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
     echo '<button class="button" type="submit" name="np_order_hub_delete_record" value="1" onclick="return confirm(\'Remove this order from the hub?\');">Delete from hub</button>';
     echo '</form>';
+    echo '</div>';
+
+    $payment_method_title = trim((string) ($live_order['payment_method_title'] ?? ''));
+    $transaction_id = trim((string) ($live_order['transaction_id'] ?? ''));
+    $created_via = trim((string) ($live_order['created_via'] ?? ''));
+    echo '<div class="card" style="max-width: 1100px; padding: 16px; margin-top: 16px;">';
+    echo '<h2 style="margin-top:0;">Live order editor</h2>';
+    echo '<p class="description">Edits here are written directly to the original WooCommerce order on the store.</p>';
+    echo '<div style="display:flex; gap:32px; flex-wrap:wrap;">';
+    echo '<div>';
+    echo '<p><strong>Payment method:</strong> ' . esc_html($payment_method_title !== '' ? $payment_method_title : '—') . '</p>';
+    echo '<p><strong>Transaction ID:</strong> ' . esc_html($transaction_id !== '' ? $transaction_id : '—') . '</p>';
+    echo '</div>';
+    echo '<div>';
+    echo '<p><strong>Created via:</strong> ' . esc_html($created_via !== '' ? $created_via : '—') . '</p>';
+    echo '<p><strong>Customer note:</strong> ' . esc_html($customer_note_value !== '' ? $customer_note_value : '—') . '</p>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<h3 style="margin-top:24px;">Addresses</h3>';
+    echo '<form method="post">';
+    wp_nonce_field('np_order_hub_update_addresses');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<div style="display:flex; gap:32px; flex-wrap:wrap; align-items:flex-start;">';
+    echo '<div style="flex:1; min-width:320px;">';
+    echo '<h4 style="margin:0 0 8px;">Billing</h4>';
+    np_order_hub_render_order_editor_address_fields('billing', $live_billing, 'billing');
+    echo '</div>';
+    echo '<div style="flex:1; min-width:320px;">';
+    echo '<h4 style="margin:0 0 8px;">Shipping</h4>';
+    np_order_hub_render_order_editor_address_fields('shipping', $live_shipping, 'shipping');
+    echo '</div>';
+    echo '</div>';
+    echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_addresses" value="1">Save addresses</button></p>';
+    echo '</form>';
+
+    echo '<div style="display:flex; gap:32px; flex-wrap:wrap; align-items:flex-start; margin-top:24px;">';
+    echo '<div style="flex:1; min-width:320px;">';
+    echo '<h3 style="margin-top:0;">Customer note</h3>';
+    echo '<form method="post">';
+    wp_nonce_field('np_order_hub_update_customer_note');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<textarea name="customer_note" rows="5" class="large-text">' . esc_textarea($customer_note_value) . '</textarea>';
+    echo '<p><button class="button" type="submit" name="np_order_hub_update_customer_note" value="1">Save customer note</button></p>';
+    echo '</form>';
+    echo '</div>';
+    echo '<div style="flex:1; min-width:320px;">';
+    echo '<h3 style="margin-top:0;">Internal order note</h3>';
+    echo '<form method="post">';
+    wp_nonce_field('np_order_hub_add_order_note');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<textarea name="order_note" rows="5" class="large-text">' . esc_textarea($order_note_form_value) . '</textarea>';
+    echo '<p><button class="button" type="submit" name="np_order_hub_add_order_note" value="1">Add note</button></p>';
+    echo '</form>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<h3 style="margin-top:24px;">Send Woo email</h3>';
+    echo '<form method="post" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">';
+    wp_nonce_field('np_order_hub_send_order_email');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<select name="order_email_action">';
+    foreach ($email_actions as $action_key => $action_label) {
+        echo '<option value="' . esc_attr((string) $action_key) . '"' . selected($order_email_action_value, (string) $action_key, false) . '>' . esc_html((string) $action_label) . '</option>';
+    }
+    echo '</select>';
+    echo '<button class="button" type="submit" name="np_order_hub_send_order_email" value="1">Send email</button>';
+    echo '</form>';
+
+    echo '<h3 style="margin-top:24px;">Recent order notes</h3>';
+    np_order_hub_render_order_editor_notes_list($order_notes);
     echo '</div>';
 
     $linked_cases = np_order_hub_help_scout_get_cases_for_record((int) $record['id']);

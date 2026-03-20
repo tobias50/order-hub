@@ -210,6 +210,31 @@ function np_order_hub_wpo_register_routes() {
         'callback' => 'np_order_hub_wpo_order_state',
         'permission_callback' => '__return_true',
     ));
+    register_rest_route('np-order-hub/v1', '/order-live', array(
+        'methods' => 'GET',
+        'callback' => 'np_order_hub_wpo_order_live',
+        'permission_callback' => '__return_true',
+    ));
+    register_rest_route('np-order-hub/v1', '/order-addresses', array(
+        'methods' => 'POST',
+        'callback' => 'np_order_hub_wpo_update_order_addresses',
+        'permission_callback' => '__return_true',
+    ));
+    register_rest_route('np-order-hub/v1', '/order-note', array(
+        'methods' => 'POST',
+        'callback' => 'np_order_hub_wpo_add_order_note',
+        'permission_callback' => '__return_true',
+    ));
+    register_rest_route('np-order-hub/v1', '/order-customer-note', array(
+        'methods' => 'POST',
+        'callback' => 'np_order_hub_wpo_update_customer_note',
+        'permission_callback' => '__return_true',
+    ));
+    register_rest_route('np-order-hub/v1', '/order-email', array(
+        'methods' => 'POST',
+        'callback' => 'np_order_hub_wpo_send_order_email',
+        'permission_callback' => '__return_true',
+    ));
     register_rest_route('np-order-hub/v1', '/orders-export', array(
         'methods' => 'GET',
         'callback' => 'np_order_hub_wpo_orders_export',
