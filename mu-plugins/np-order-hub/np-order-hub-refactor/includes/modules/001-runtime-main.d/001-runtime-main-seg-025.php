@@ -366,11 +366,13 @@ function np_order_hub_render_order_editor_styles() {
     echo '<style>
         .np-oh-editor-screen.wrap{max-width:1380px}
         .np-oh-editor-screen #poststuff{padding-top:0}
-        .np-oh-editor-screen #post-body.columns-2{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px;margin:0;align-items:start}
+        .np-oh-editor-screen #poststuff #post-body.columns-2,
+        .np-oh-editor-screen #post-body.columns-2{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px;margin:0!important;margin-right:0!important;align-items:start}
         .np-oh-editor-screen #postbox-container-1,
         .np-oh-editor-screen #postbox-container-2{float:none!important;width:auto!important;margin:0!important}
-        .np-oh-editor-screen #postbox-container-1{grid-column:2}
+        .np-oh-editor-screen #postbox-container-1{grid-column:2;width:280px!important;max-width:280px}
         .np-oh-editor-screen #postbox-container-2{grid-column:1;min-width:0}
+        .np-oh-editor-screen .np-oh-sidebar-actions{width:100%}
         .np-oh-editor-screen .postbox{margin:0 0 16px}
         .np-oh-editor-screen .postbox .hndle{margin:0;padding:11px 12px;border-bottom:1px solid #ccd0d4;font-size:13px;font-weight:600}
         .np-oh-editor-screen .inside{margin:0;padding:12px}
@@ -419,9 +421,10 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .np-oh-case-card .description{display:block;margin-top:2px}
         .np-oh-editor-screen .np-oh-case-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
         @media (max-width: 1080px){
+            .np-oh-editor-screen #poststuff #post-body.columns-2,
             .np-oh-editor-screen #post-body.columns-2{grid-template-columns:1fr}
             .np-oh-editor-screen #postbox-container-1,
-            .np-oh-editor-screen #postbox-container-2{grid-column:auto;width:100%!important}
+            .np-oh-editor-screen #postbox-container-2{grid-column:auto;width:100%!important;max-width:none}
         }
         @media (max-width: 960px){
             .np-oh-editor-screen .order_data_column_container{grid-template-columns:1fr}
