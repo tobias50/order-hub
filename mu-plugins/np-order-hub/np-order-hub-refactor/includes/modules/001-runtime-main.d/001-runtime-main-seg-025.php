@@ -1,6 +1,18 @@
 <?php
 add_shortcode('np_order_hub_revenue_dashboard', 'np_order_hub_revenue_dashboard_shortcode');
 
+add_filter('admin_body_class', 'np_order_hub_details_admin_body_class');
+
+function np_order_hub_details_admin_body_class($classes) {
+    $page = isset($_GET['page']) ? sanitize_key((string) wp_unslash($_GET['page'])) : '';
+    if ($page !== 'np-order-hub-details') {
+        return $classes;
+    }
+    $classes = trim((string) $classes);
+    $classes .= ($classes !== '' ? ' ' : '') . 'np-oh-editor-screen-body';
+    return $classes;
+}
+
 function np_order_hub_help_scout_page() {
     if (!current_user_can('manage_options')) {
         return;
@@ -365,12 +377,33 @@ function np_order_hub_render_order_editor_notes_list($notes) {
 function np_order_hub_render_order_editor_styles() {
     echo '<style>
         .np-oh-editor-screen.wrap{max-width:1380px}
-        .np-oh-editor-screen #poststuff{padding-top:0}
-        .np-oh-editor-screen #post-body.np-oh-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px;margin:0!important;align-items:start}
-        .np-oh-editor-screen #postbox-container-1,
-        .np-oh-editor-screen #postbox-container-2{float:none!important;width:auto!important;margin:0!important}
-        .np-oh-editor-screen #postbox-container-1{grid-column:2;width:280px!important;max-width:280px}
-        .np-oh-editor-screen #postbox-container-2{grid-column:1;min-width:0}
+        .np-oh-editor-screen .np-oh-poststuff{padding-top:0}
+        body.np-oh-editor-screen-body #post-body,
+        body.np-oh-editor-screen-body #post-body.metabox-holder,
+        body.np-oh-editor-screen-body #post-body.metabox-holder.columns-2{
+            margin:0!important;
+            margin-right:0!important;
+            padding:0!important;
+            max-width:none!important;
+            display:block!important;
+            min-width:0!important;
+        }
+        body.np-oh-editor-screen-body #post-body-content,
+        body.np-oh-editor-screen-body #side-sortables,
+        body.np-oh-editor-screen-body #normal-sortables,
+        body.np-oh-editor-screen-body #postbox-container-1,
+        body.np-oh-editor-screen-body #postbox-container-2{
+            margin:0!important;
+            float:none!important;
+            width:auto!important;
+            max-width:none!important;
+            min-width:0!important;
+        }
+        .np-oh-editor-screen .np-oh-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px;margin:0!important;align-items:start}
+        .np-oh-editor-screen .np-oh-sidebar-column,
+        .np-oh-editor-screen .np-oh-main-column{float:none!important;width:auto!important;margin:0!important}
+        .np-oh-editor-screen .np-oh-sidebar-column{grid-column:2;width:280px!important;max-width:280px}
+        .np-oh-editor-screen .np-oh-main-column{grid-column:1;min-width:0}
         .np-oh-editor-screen .np-oh-sidebar-actions{width:100%}
         .np-oh-editor-screen .postbox{margin:0 0 16px}
         .np-oh-editor-screen .postbox .hndle{margin:0;padding:11px 12px;border-bottom:1px solid #ccd0d4;font-size:13px;font-weight:600}
@@ -420,9 +453,9 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .np-oh-case-card .description{display:block;margin-top:2px}
         .np-oh-editor-screen .np-oh-case-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
         @media (max-width: 1080px){
-            .np-oh-editor-screen #post-body.np-oh-layout{grid-template-columns:1fr}
-            .np-oh-editor-screen #postbox-container-1,
-            .np-oh-editor-screen #postbox-container-2{grid-column:auto;width:100%!important;max-width:none}
+            .np-oh-editor-screen .np-oh-layout{grid-template-columns:1fr}
+            .np-oh-editor-screen .np-oh-sidebar-column,
+            .np-oh-editor-screen .np-oh-main-column{grid-column:auto;width:100%!important;max-width:none}
         }
         @media (max-width: 960px){
             .np-oh-editor-screen .order_data_column_container{grid-template-columns:1fr}
@@ -1006,9 +1039,9 @@ function np_order_hub_order_details_page() {
     np_order_hub_render_order_editor_styles();
     echo '<h1 class="wp-heading-inline">Edit order ' . esc_html($order_label) . '</h1>';
     echo '<a class="page-title-action" href="' . esc_url(admin_url('admin.php?page=np-order-hub')) . '">Back to hub</a>';
-    echo '<div id="poststuff">';
-    echo '<div id="post-body" class="np-oh-layout">';
-    echo '<div id="postbox-container-1" class="postbox-container">';
+    echo '<div class="np-oh-poststuff">';
+    echo '<div class="np-oh-layout">';
+    echo '<div class="np-oh-sidebar-column">';
 
     echo '<div class="postbox">';
     echo '<h2 class="hndle">Order actions</h2>';
@@ -1140,7 +1173,7 @@ function np_order_hub_order_details_page() {
 
     echo '</div>';
 
-    echo '<div id="postbox-container-2" class="postbox-container">';
+    echo '<div class="np-oh-main-column">';
 
     echo '<div class="postbox">';
     echo '<h2 class="hndle">Order data</h2>';
