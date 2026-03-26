@@ -364,11 +364,13 @@ function np_order_hub_render_order_editor_notes_list($notes) {
 
 function np_order_hub_render_order_editor_styles() {
     echo '<style>
-        .np-oh-editor-screen.wrap{max-width:1280px}
+        .np-oh-editor-screen.wrap{max-width:1380px}
         .np-oh-editor-screen #poststuff{padding-top:0}
-        .np-oh-editor-screen #post-body.columns-2{margin-right:300px}
-        .np-oh-editor-screen #postbox-container-1{float:right;margin-right:-300px;width:280px}
-        .np-oh-editor-screen #postbox-container-2{float:none;width:auto}
+        .np-oh-editor-screen #post-body.columns-2{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px;margin:0;align-items:start}
+        .np-oh-editor-screen #postbox-container-1,
+        .np-oh-editor-screen #postbox-container-2{float:none!important;width:auto!important;margin:0!important}
+        .np-oh-editor-screen #postbox-container-1{grid-column:2}
+        .np-oh-editor-screen #postbox-container-2{grid-column:1;min-width:0}
         .np-oh-editor-screen .postbox{margin:0 0 16px}
         .np-oh-editor-screen .postbox .hndle{margin:0;padding:11px 12px;border-bottom:1px solid #ccd0d4;font-size:13px;font-weight:600}
         .np-oh-editor-screen .inside{margin:0;padding:12px}
@@ -417,10 +419,9 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .np-oh-case-card .description{display:block;margin-top:2px}
         .np-oh-editor-screen .np-oh-case-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
         @media (max-width: 1080px){
-            .np-oh-editor-screen #post-body.columns-2{margin-right:0}
+            .np-oh-editor-screen #post-body.columns-2{grid-template-columns:1fr}
             .np-oh-editor-screen #postbox-container-1,
-            .np-oh-editor-screen #postbox-container-2{float:none;width:100%;margin-right:0}
-            .np-oh-editor-screen #postbox-container-1{margin-top:16px}
+            .np-oh-editor-screen #postbox-container-2{grid-column:auto;width:100%!important}
         }
         @media (max-width: 960px){
             .np-oh-editor-screen .order_data_column_container{grid-template-columns:1fr}
@@ -914,7 +915,7 @@ function np_order_hub_order_details_page() {
     $help_scout_last_name = !empty($help_scout_billing['last_name']) ? sanitize_text_field((string) $help_scout_billing['last_name']) : '';
     $customer_note_value = isset($live_order['customer_note']) ? (string) $live_order['customer_note'] : $customer_note_value;
 
-    echo '<div class="wrap">';
+    echo '<div class="wrap woocommerce np-oh-editor-screen">';
     echo '<h1>Order Details</h1>';
     echo '<p><a href="' . esc_url(admin_url('admin.php?page=np-order-hub')) . '">&larr; Back to orders</a></p>';
 
@@ -1001,7 +1002,6 @@ function np_order_hub_order_details_page() {
     $created_via = trim((string) ($live_order['created_via'] ?? ''));
     $linked_cases = np_order_hub_help_scout_get_cases_for_record((int) $record['id']);
 
-    echo '<div class="wrap woocommerce np-oh-editor-screen">';
     np_order_hub_render_order_editor_styles();
     echo '<h1 class="wp-heading-inline">Edit order ' . esc_html($order_label) . '</h1>';
     echo '<a class="page-title-action" href="' . esc_url(admin_url('admin.php?page=np-order-hub')) . '">Back to hub</a>';
@@ -1302,10 +1302,6 @@ function np_order_hub_order_details_page() {
     echo '</div>';
     echo '</div>';
 
-    echo '</div>';
-    echo '</div>';
-    echo '</div>';
-
     $help_scout_settings = np_order_hub_get_help_scout_settings();
     $help_scout_subject_default = 'Order ' . $order_label;
     $help_scout_subject_value = $help_scout_form['subject'] !== '' ? $help_scout_form['subject'] : $help_scout_subject_default;
@@ -1320,7 +1316,9 @@ function np_order_hub_order_details_page() {
         $help_scout_status_value = $help_scout_settings['default_status'];
     }
 
-    echo '<h2>Help Scout</h2>';
+    echo '<div class="postbox">';
+    echo '<h2 class="hndle">Help Scout</h2>';
+    echo '<div class="inside">';
     if ($help_scout_settings['token'] === '' || empty($help_scout_settings['mailbox_id'])) {
         $settings_url = admin_url('admin.php?page=np-order-hub-help-scout');
         echo '<p class="description">Add a Help Scout API token and mailbox ID in <a href="' . esc_url($settings_url) . '">Help Scout settings</a>.</p>';
@@ -1347,8 +1345,12 @@ function np_order_hub_order_details_page() {
         echo '<p><button class="button button-primary" type="submit" name="np_order_hub_help_scout_send" value="1">Send message</button></p>';
         echo '</form>';
     }
+    echo '</div>';
+    echo '</div>';
 
-    echo '<h2>Reklamasjon</h2>';
+    echo '<div class="postbox">';
+    echo '<h2 class="hndle">Reklamasjon</h2>';
+    echo '<div class="inside">';
     $token_missing = np_order_hub_get_store_token($store) === '';
     if ($token_missing) {
         echo '<p>Store token missing in hub store settings.</p>';
@@ -1441,8 +1443,12 @@ function np_order_hub_order_details_page() {
             });
         </script>';
     }
+    echo '</div>';
+    echo '</div>';
 
-    echo '<h2>Items</h2>';
+    echo '<div class="postbox">';
+    echo '<h2 class="hndle">Items</h2>';
+    echo '<div class="inside">';
     echo '<table class="widefat striped">';
     echo '<thead><tr>';
     echo '<th>Product</th>';
@@ -1487,5 +1493,11 @@ function np_order_hub_order_details_page() {
 
     echo '</tbody>';
     echo '</table>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '</div>';
+    echo '</div>';
+    echo '</div>';
     echo '</div>';
 }
