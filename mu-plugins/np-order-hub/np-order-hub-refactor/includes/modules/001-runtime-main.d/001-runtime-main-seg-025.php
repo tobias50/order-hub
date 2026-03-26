@@ -411,6 +411,11 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .np-oh-order-note{margin:0 0 12px;padding:10px 12px;background:#f6f7f7;border:1px solid #dcdcde;border-radius:3px}
         .np-oh-editor-screen .np-oh-order-note-meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;font-size:12px;color:#50575e}
         .np-oh-editor-screen .np-oh-order-note-body{white-space:pre-wrap}
+        .np-oh-editor-screen .np-oh-case-list{display:flex;flex-direction:column;gap:12px}
+        .np-oh-editor-screen .np-oh-case-card{padding:12px;background:#f6f7f7;border:1px solid #dcdcde;border-radius:3px}
+        .np-oh-editor-screen .np-oh-case-card p{margin:0 0 6px}
+        .np-oh-editor-screen .np-oh-case-card .description{display:block;margin-top:2px}
+        .np-oh-editor-screen .np-oh-case-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
         @media (max-width: 1080px){
             .np-oh-editor-screen #post-body.columns-2{margin-right:0}
             .np-oh-editor-screen #postbox-container-1,
@@ -994,6 +999,7 @@ function np_order_hub_order_details_page() {
     $payment_method_title = trim((string) ($live_order['payment_method_title'] ?? ''));
     $transaction_id = trim((string) ($live_order['transaction_id'] ?? ''));
     $created_via = trim((string) ($live_order['created_via'] ?? ''));
+    $linked_cases = np_order_hub_help_scout_get_cases_for_record((int) $record['id']);
 
     echo '<div class="wrap woocommerce np-oh-editor-screen">';
     np_order_hub_render_order_editor_styles();
@@ -1066,6 +1072,44 @@ function np_order_hub_order_details_page() {
     echo '</form>';
     echo '</div>';
     echo '</div>';
+
+    echo '<div class="postbox">';
+    echo '<h2 class="hndle">Saker</h2>';
+    echo '<div class="inside">';
+    if (empty($linked_cases)) {
+        echo '<p class="description">Ingen koblede saker for denne ordren.</p>';
+    } else {
+        echo '<div class="np-oh-case-list">';
+        foreach ($linked_cases as $case) {
+            $case_id = isset($case['id']) ? (int) $case['id'] : 0;
+            $case_subject = trim((string) ($case['subject'] ?? ''));
+            $case_customer = trim((string) (($case['customer_name'] ?? '') ?: ($case['customer_email'] ?? '')));
+            $case_status = np_order_hub_help_scout_case_status_label((string) ($case['remote_status'] ?? ''));
+            $case_last_thread = trim((string) ($case['last_thread_at_gmt'] ?? ''));
+            $case_last_thread_label = $case_last_thread !== '' && $case_last_thread !== '0000-00-00 00:00:00'
+                ? get_date_from_gmt($case_last_thread, 'd.m.Y H:i')
+                : '—';
+            $case_details_url = admin_url('admin.php?page=np-order-hub-case-details&case_id=' . $case_id);
+            $case_remote_url = trim((string) ($case['remote_web_url'] ?? ''));
+
+            echo '<div class="np-oh-case-card">';
+            echo '<p><strong>' . esc_html($case_subject !== '' ? $case_subject : '(uten emne)') . '</strong></p>';
+            echo '<p>' . esc_html($case_customer !== '' ? $case_customer : 'Ukjent') . '</p>';
+            echo '<span class="description">Status: ' . esc_html($case_status) . '</span>';
+            echo '<span class="description">Sist oppdatert: ' . esc_html($case_last_thread_label) . '</span>';
+            echo '<div class="np-oh-case-actions">';
+            echo '<a class="button button-small" href="' . esc_url($case_details_url) . '">Åpne sak</a>';
+            if ($case_remote_url !== '') {
+                echo '<a class="button button-small" href="' . esc_url($case_remote_url) . '" target="_blank" rel="noopener">Help Scout</a>';
+            }
+            echo '</div>';
+            echo '</div>';
+        }
+        echo '</div>';
+    }
+    echo '</div>';
+    echo '</div>';
+
     echo '<div class="postbox">';
     echo '<h2 class="hndle">Customer note</h2>';
     echo '<div class="inside">';
@@ -1261,46 +1305,6 @@ function np_order_hub_order_details_page() {
     echo '</div>';
     echo '</div>';
     echo '</div>';
-
-    $linked_cases = np_order_hub_help_scout_get_cases_for_record((int) $record['id']);
-    echo '<h2>Saker</h2>';
-    if (empty($linked_cases)) {
-        echo '<p>Ingen koblede saker for denne ordren.</p>';
-    } else {
-        echo '<table class="widefat striped" style="max-width: 1100px; margin-bottom: 18px;">';
-        echo '<thead><tr>';
-        echo '<th>Emne</th>';
-        echo '<th>Kunde</th>';
-        echo '<th>Status</th>';
-        echo '<th>Sist oppdatert</th>';
-        echo '<th>Handlinger</th>';
-        echo '</tr></thead><tbody>';
-        foreach ($linked_cases as $case) {
-            $case_id = isset($case['id']) ? (int) $case['id'] : 0;
-            $case_subject = trim((string) ($case['subject'] ?? ''));
-            $case_customer = trim((string) (($case['customer_name'] ?? '') ?: ($case['customer_email'] ?? '')));
-            $case_status = np_order_hub_help_scout_case_status_label((string) ($case['remote_status'] ?? ''));
-            $case_last_thread = trim((string) ($case['last_thread_at_gmt'] ?? ''));
-            $case_last_thread_label = $case_last_thread !== '' && $case_last_thread !== '0000-00-00 00:00:00'
-                ? get_date_from_gmt($case_last_thread, 'd.m.Y H:i')
-                : '—';
-            $case_details_url = admin_url('admin.php?page=np-order-hub-case-details&case_id=' . $case_id);
-            $case_remote_url = trim((string) ($case['remote_web_url'] ?? ''));
-
-            echo '<tr>';
-            echo '<td>' . esc_html($case_subject !== '' ? $case_subject : '(uten emne)') . '</td>';
-            echo '<td>' . esc_html($case_customer !== '' ? $case_customer : 'Ukjent') . '</td>';
-            echo '<td>' . esc_html($case_status) . '</td>';
-            echo '<td>' . esc_html($case_last_thread_label) . '</td>';
-            echo '<td><a class="button button-small" href="' . esc_url($case_details_url) . '">Åpne sak</a> ';
-            if ($case_remote_url !== '') {
-                echo '<a class="button button-small" href="' . esc_url($case_remote_url) . '" target="_blank" rel="noopener">Help Scout</a>';
-            }
-            echo '</td>';
-            echo '</tr>';
-        }
-        echo '</tbody></table>';
-    }
 
     $help_scout_settings = np_order_hub_get_help_scout_settings();
     $help_scout_subject_default = 'Order ' . $order_label;
