@@ -340,10 +340,235 @@ function np_order_hub_render_order_editor_address_fields($prefix, $values, $type
     echo '</div>';
 }
 
+function np_order_hub_selected_class_meta_keys() {
+    return array(
+        'selected_class',
+        '_selected_class',
+        'selected_class_name',
+        'selected_class_value',
+        'selected class',
+        'selected class:',
+        'klasse',
+        'klasse:',
+        'np_selected_class',
+        '_np_selected_class',
+        'school_class',
+        'class_selection',
+        '_class_selection',
+        '_class',
+        'class',
+    );
+}
+
+function np_order_hub_normalize_selected_class_key($key) {
+    $key = strtolower(trim(wp_strip_all_tags((string) $key)));
+    $key = str_replace(array('-', ':', '  '), array('_', '', ' '), $key);
+    $key = preg_replace('/\s+/', '_', $key);
+    return is_string($key) ? $key : '';
+}
+
+function np_order_hub_is_selected_class_meta_key($key) {
+    $normalized = np_order_hub_normalize_selected_class_key($key);
+    if ($normalized === '') {
+        return false;
+    }
+
+    $keys = array_map('np_order_hub_normalize_selected_class_key', np_order_hub_selected_class_meta_keys());
+    return in_array($normalized, $keys, true);
+}
+
+function np_order_hub_extract_selected_class_from_value($value, $allow_unlabeled = false) {
+    if (is_array($value)) {
+        foreach ($value as $item) {
+            $found = np_order_hub_extract_selected_class_from_value($item, $allow_unlabeled);
+            if ($found !== '') {
+                return $found;
+            }
+        }
+        return '';
+    }
+
+    if (is_object($value)) {
+        if (method_exists($value, 'get_data')) {
+            return np_order_hub_extract_selected_class_from_value($value->get_data(), $allow_unlabeled);
+        }
+        return np_order_hub_extract_selected_class_from_value((array) $value, $allow_unlabeled);
+    }
+
+    if (!is_scalar($value)) {
+        return '';
+    }
+
+    $text = trim(wp_strip_all_tags((string) $value));
+    if ($text === '') {
+        return '';
+    }
+
+    if (preg_match('/(?:selected\s*class|klasse)\s*:?\s*(.+)$/iu', $text, $matches)) {
+        return sanitize_text_field(trim((string) $matches[1]));
+    }
+
+    return $allow_unlabeled ? sanitize_text_field($text) : '';
+}
+
+function np_order_hub_get_order_editor_selected_class($live_order) {
+    $live_order = is_array($live_order) ? $live_order : array();
+
+    $direct_keys = array(
+        'selected_class',
+        'selectedClass',
+        'selected_class_name',
+    );
+    foreach ($direct_keys as $key) {
+        if (!empty($live_order[$key])) {
+            $selected_class = np_order_hub_extract_selected_class_from_value($live_order[$key], true);
+            if ($selected_class !== '') {
+                return $selected_class;
+            }
+        }
+    }
+
+    foreach ((array) ($live_order['meta_data'] ?? array()) as $meta) {
+        if (!is_array($meta)) {
+            continue;
+        }
+        $meta_key = (string) ($meta['display_key'] ?? $meta['key'] ?? '');
+        $meta_value = $meta['display_value'] ?? $meta['value'] ?? '';
+        if (np_order_hub_is_selected_class_meta_key($meta_key)) {
+            $selected_class = np_order_hub_extract_selected_class_from_value($meta_value, true);
+            if ($selected_class !== '') {
+                return $selected_class;
+            }
+        }
+        $selected_class = np_order_hub_extract_selected_class_from_value($meta_value, false);
+        if ($selected_class !== '') {
+            return $selected_class;
+        }
+    }
+
+    foreach ((array) ($live_order['line_items'] ?? array()) as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        foreach ((array) ($item['meta_data'] ?? array()) as $meta) {
+            if (!is_array($meta)) {
+                continue;
+            }
+            $meta_key = (string) ($meta['display_key'] ?? $meta['key'] ?? '');
+            $meta_value = $meta['display_value'] ?? $meta['value'] ?? '';
+            if (np_order_hub_is_selected_class_meta_key($meta_key)) {
+                $selected_class = np_order_hub_extract_selected_class_from_value($meta_value, true);
+                if ($selected_class !== '') {
+                    return $selected_class;
+                }
+            }
+            $selected_class = np_order_hub_extract_selected_class_from_value($meta_value, false);
+            if ($selected_class !== '') {
+                return $selected_class;
+            }
+        }
+    }
+
+    return '';
+}
+
+function np_order_hub_get_order_editor_address_summary_rows($values, $type) {
+    $values = is_array($values) ? $values : array();
+    $type = $type === 'shipping' ? 'shipping' : 'billing';
+    $rows = array();
+
+    $name = trim(
+        trim((string) ($values['first_name'] ?? '')) . ' ' . trim((string) ($values['last_name'] ?? ''))
+    );
+    if ($name !== '') {
+        $rows[] = array('label' => '', 'value' => $name);
+    }
+
+    $company = trim((string) ($values['company'] ?? ''));
+    if ($company !== '' && $company !== $name) {
+        $rows[] = array('label' => '', 'value' => $company);
+    }
+
+    foreach (array('address_1', 'address_2') as $field) {
+        $line = trim((string) ($values[$field] ?? ''));
+        if ($line !== '') {
+            $rows[] = array('label' => '', 'value' => $line);
+        }
+    }
+
+    $locality_parts = array();
+    $postcode = trim((string) ($values['postcode'] ?? ''));
+    $city = trim((string) ($values['city'] ?? ''));
+    $state = trim((string) ($values['state'] ?? ''));
+    if ($postcode !== '') {
+        $locality_parts[] = $postcode;
+    }
+    if ($city !== '') {
+        $locality_parts[] = $city;
+    }
+    $locality = trim(implode(' ', $locality_parts));
+    if ($state !== '') {
+        $locality = $locality !== '' ? ($locality . ', ' . $state) : $state;
+    }
+    if ($locality !== '') {
+        $rows[] = array('label' => '', 'value' => $locality);
+    }
+
+    $country = trim((string) ($values['country'] ?? ''));
+    if ($country !== '') {
+        $rows[] = array('label' => '', 'value' => $country);
+    }
+
+    if ($type === 'billing') {
+        $email = trim((string) ($values['email'] ?? ''));
+        if ($email !== '') {
+            $rows[] = array('label' => 'E-postadresse', 'value' => $email);
+        }
+    }
+
+    $phone = trim((string) ($values['phone'] ?? ''));
+    if ($phone !== '') {
+        $rows[] = array('label' => 'Telefon', 'value' => $phone);
+    }
+
+    return $rows;
+}
+
+function np_order_hub_render_order_editor_address_panel($prefix, $values, $type) {
+    $summary_rows = np_order_hub_get_order_editor_address_summary_rows($values, $type);
+
+    echo '<div class="np-oh-address-card">';
+    if (empty($summary_rows)) {
+        echo '<p class="description">Ingen opplysninger lagret.</p>';
+    } else {
+        echo '<div class="np-oh-address-summary">';
+        foreach ($summary_rows as $row) {
+            $label = (string) ($row['label'] ?? '');
+            $value = (string) ($row['value'] ?? '');
+            if ($value === '') {
+                continue;
+            }
+            echo '<p>';
+            if ($label !== '') {
+                echo '<strong>' . esc_html($label) . ':</strong> ';
+            }
+            echo esc_html($value);
+            echo '</p>';
+        }
+        echo '</div>';
+    }
+
+    echo '<details class="np-oh-address-edit">';
+    echo '<summary>Rediger</summary>';
+    np_order_hub_render_order_editor_address_fields($prefix, $values, $type);
+    echo '</details>';
+    echo '</div>';
+}
+
 function np_order_hub_render_order_editor_notes_list($notes) {
     $notes = is_array($notes) ? $notes : array();
     if (empty($notes)) {
-        echo '<p class="description">No recent order notes found.</p>';
+        echo '<p class="description">Ingen nylige ordrenotater funnet.</p>';
         return;
     }
 
@@ -356,10 +581,10 @@ function np_order_hub_render_order_editor_notes_list($notes) {
         $created_label = $created !== '' && $created !== '0000-00-00 00:00:00'
             ? get_date_from_gmt($created, 'd.m.Y H:i')
             : '—';
-        $type = !empty($note['is_customer_note']) ? 'Customer note' : 'Internal';
+        $type = !empty($note['is_customer_note']) ? 'Kundenotat' : 'Internt notat';
         $author = trim((string) ($note['added_by'] ?? ''));
         if ($author === '') {
-            $author = !empty($note['added_by_user']) ? 'User' : 'System';
+            $author = !empty($note['added_by_user']) ? 'Bruker' : 'System';
         }
         $message = trim((string) ($note['note'] ?? ''));
         echo '<li class="np-oh-order-note">';
@@ -454,6 +679,13 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .np-oh-sidebar-actions .button{margin:0 8px 8px 0}
         .np-oh-editor-screen .np-oh-sidebar-actions select,
         .np-oh-editor-screen .np-oh-sidebar-actions input[type=text]{width:100%}
+        .np-oh-editor-screen .np-oh-address-card{display:flex;flex-direction:column;gap:12px}
+        .np-oh-editor-screen .np-oh-address-summary{min-height:132px;padding:14px;border:1px solid #dcdcde;background:#fff}
+        .np-oh-editor-screen .np-oh-address-summary p{margin:0 0 6px;line-height:1.5}
+        .np-oh-editor-screen .np-oh-address-summary p:last-child{margin-bottom:0}
+        .np-oh-editor-screen .np-oh-address-edit{border-top:1px solid #eee;padding-top:10px}
+        .np-oh-editor-screen .np-oh-address-edit summary{cursor:pointer;font-weight:600;color:#2271b1}
+        .np-oh-editor-screen .np-oh-address-edit[open] summary{margin-bottom:12px}
         .np-oh-editor-screen .np-oh-address-fields{display:grid;gap:12px}
         .np-oh-editor-screen .np-oh-field{display:block}
         .np-oh-editor-screen .np-oh-field-label{display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:#50575e}
@@ -692,9 +924,9 @@ function np_order_hub_order_details_page() {
         if ($help_scout_settings['token'] === '' || empty($help_scout_settings['mailbox_id'])) {
             $help_scout_notice = array('type' => 'error', 'message' => 'Help Scout settings are missing. Add an API token and mailbox ID.', 'allow_html' => false);
         } elseif ($help_scout_email === '') {
-            $help_scout_notice = array('type' => 'error', 'message' => 'Customer email is missing on this order.', 'allow_html' => false);
+            $help_scout_notice = array('type' => 'error', 'message' => 'Kunde-e-post mangler på denne ordren.', 'allow_html' => false);
         } elseif ($help_scout_form['subject'] === '' || $help_scout_form['message'] === '') {
-            $help_scout_notice = array('type' => 'error', 'message' => 'Subject and message are required.', 'allow_html' => false);
+            $help_scout_notice = array('type' => 'error', 'message' => 'Emne og melding er påkrevd.', 'allow_html' => false);
         } else {
             $customer = array('email' => $help_scout_email);
             if ($help_scout_first_name !== '') {
@@ -971,9 +1203,9 @@ function np_order_hub_order_details_page() {
         }));
         $reklamasjon_selected_items = $selected_items;
         if (empty($line_items)) {
-            $reklamasjon_notice = array('type' => 'error', 'message' => 'No line items found for this order.', 'allow_html' => false);
+            $reklamasjon_notice = array('type' => 'error', 'message' => 'Ingen varelinjer funnet for denne ordren.', 'allow_html' => false);
         } elseif (empty($selected_items)) {
-            $reklamasjon_notice = array('type' => 'error', 'message' => 'Select at least one item for the claim order.', 'allow_html' => false);
+            $reklamasjon_notice = array('type' => 'error', 'message' => 'Velg minst én varelinje for reklamasjonsordren.', 'allow_html' => false);
         } else {
             $items_by_id = array();
             foreach ($line_items as $item) {
@@ -989,7 +1221,7 @@ function np_order_hub_order_details_page() {
             $errors = array();
             foreach ($selected_items as $item_id) {
                 if (empty($items_by_id[$item_id])) {
-                    $errors[] = 'Selected item not found.';
+                    $errors[] = 'Valgt varelinje ble ikke funnet.';
                     continue;
                 }
                 $source = $items_by_id[$item_id];
@@ -1152,6 +1384,7 @@ function np_order_hub_order_details_page() {
     }
     $status_label = np_order_hub_get_order_editor_status_label($record['status'] ?? '', $allowed_statuses);
     $customer_label = np_order_hub_get_order_editor_customer_label($live_order);
+    $selected_class = np_order_hub_get_order_editor_selected_class($live_order);
     $linked_cases = np_order_hub_help_scout_get_cases_for_record((int) $record['id']);
     $header_bits = array();
     if ($payment_method_title !== '') {
@@ -1338,15 +1571,18 @@ function np_order_hub_order_details_page() {
     if ($created_via !== '') {
         echo '<p><strong>Opprettet via:</strong> ' . esc_html($created_via) . '</p>';
     }
+    if ($selected_class !== '') {
+        echo '<p><strong>Selected Class:</strong> ' . esc_html($selected_class) . '</p>';
+    }
     echo '</div>';
     echo '</div>';
     echo '<div class="order_data_column">';
     echo '<h3>Fakturering</h3>';
-    np_order_hub_render_order_editor_address_fields('billing', $live_billing, 'billing');
+    np_order_hub_render_order_editor_address_panel('billing', $live_billing, 'billing');
     echo '</div>';
     echo '<div class="order_data_column">';
     echo '<h3>Frakt</h3>';
-    np_order_hub_render_order_editor_address_fields('shipping', $live_shipping, 'shipping');
+    np_order_hub_render_order_editor_address_panel('shipping', $live_shipping, 'shipping');
     echo '</div>';
     echo '</div>';
     echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_addresses" value="1">Lagre ordredata</button></p>';
@@ -1524,16 +1760,16 @@ function np_order_hub_order_details_page() {
     echo '<div class="inside">';
     if ($help_scout_settings['token'] === '' || empty($help_scout_settings['mailbox_id'])) {
         $settings_url = admin_url('admin.php?page=np-order-hub-help-scout');
-        echo '<p class="description">Add a Help Scout API token and mailbox ID in <a href="' . esc_url($settings_url) . '">Help Scout settings</a>.</p>';
+        echo '<p class="description">Legg inn Help Scout API-token og mailbox-ID i <a href="' . esc_url($settings_url) . '">Help Scout-innstillinger</a>.</p>';
     } elseif ($help_scout_email === '') {
-        echo '<p class="description">Customer email is missing on this order.</p>';
+        echo '<p class="description">Kunde-e-post mangler på denne ordren.</p>';
     } else {
-        echo '<p><strong>Customer:</strong> ' . esc_html($help_scout_email) . '</p>';
+        echo '<p><strong>Kunde:</strong> ' . esc_html($help_scout_email) . '</p>';
         echo '<form method="post" style="max-width: 900px;">';
         wp_nonce_field('np_order_hub_help_scout_send');
         echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
         echo '<table class="form-table">';
-        echo '<tr><th scope="row"><label for="np-order-hub-help-scout-subject">Subject</label></th>';
+        echo '<tr><th scope="row"><label for="np-order-hub-help-scout-subject">Emne</label></th>';
         echo '<td><input id="np-order-hub-help-scout-subject" name="help_scout_subject" type="text" class="regular-text" value="' . esc_attr($help_scout_subject_value) . '" /></td></tr>';
         echo '<tr><th scope="row"><label for="np-order-hub-help-scout-status">Status</label></th>';
         echo '<td><select id="np-order-hub-help-scout-status" name="help_scout_status">';
@@ -1542,10 +1778,10 @@ function np_order_hub_order_details_page() {
             echo '<option value="' . esc_attr($key) . '"' . $selected . '>' . esc_html($label) . '</option>';
         }
         echo '</select></td></tr>';
-        echo '<tr><th scope="row"><label for="np-order-hub-help-scout-message">Message</label></th>';
+        echo '<tr><th scope="row"><label for="np-order-hub-help-scout-message">Melding</label></th>';
         echo '<td><textarea id="np-order-hub-help-scout-message" name="help_scout_message" rows="6" class="large-text">' . esc_textarea($help_scout_message_value) . '</textarea></td></tr>';
         echo '</table>';
-        echo '<p><button class="button button-primary" type="submit" name="np_order_hub_help_scout_send" value="1">Send message</button></p>';
+        echo '<p><button class="button button-primary" type="submit" name="np_order_hub_help_scout_send" value="1">Send melding</button></p>';
         echo '</form>';
     }
     echo '</div>';
@@ -1556,9 +1792,9 @@ function np_order_hub_order_details_page() {
     echo '<div class="inside">';
     $token_missing = np_order_hub_get_store_token($store) === '';
     if ($token_missing) {
-        echo '<p>Store token missing in hub store settings.</p>';
+        echo '<p>Butikktoken mangler i hub-innstillingene.</p>';
     } elseif (empty($line_items)) {
-        echo '<p>No line items found for this order.</p>';
+        echo '<p>Ingen varelinjer funnet for denne ordren.</p>';
     } else {
         echo '<label style="display:inline-flex; align-items:center; gap:6px;">';
         echo '<input type="checkbox" id="np-order-hub-reklamasjon-toggle"' . ($reklamasjon_open ? ' checked' : '') . ' /> Reklamasjon';
@@ -1569,10 +1805,10 @@ function np_order_hub_order_details_page() {
         echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
         echo '<table class="widefat striped">';
         echo '<thead><tr>';
-        echo '<th>Select</th>';
-        echo '<th>Product</th>';
-        echo '<th>Ordered Qty</th>';
-        echo '<th>Claim Qty</th>';
+        echo '<th>Velg</th>';
+        echo '<th>Produkt</th>';
+        echo '<th>Bestilt antall</th>';
+        echo '<th>Reklamasjonsantall</th>';
         echo '<th>SKU</th>';
         echo '</tr></thead>';
         echo '<tbody>';
@@ -1609,14 +1845,14 @@ function np_order_hub_order_details_page() {
         $allow_checked = $reklamasjon_allow_oos ? ' checked' : '';
         echo '<p style="margin-top:10px;">';
         echo '<label style="display:inline-flex; align-items:center; gap:6px;">';
-        echo '<input type="checkbox" name="reklamasjon_allow_oos" value="1"' . $allow_checked . ' /> Create even if out of stock (customer waiting for stock)';
+        echo '<input type="checkbox" name="reklamasjon_allow_oos" value="1"' . $allow_checked . ' /> Opprett selv om varen er utsolgt (kunden venter på lager)';
         echo '</label>';
         echo '</p>';
         if ($reklamasjon_popup_message !== '') {
             echo '<input type="hidden" id="np-order-hub-reklamasjon-popup" value="' . esc_attr($reklamasjon_popup_message) . '" />';
         }
         echo '<p style="margin-top:12px;">';
-        echo '<button class="button button-primary" type="submit" name="np_order_hub_create_reklamasjon" value="1">Create claim order</button>';
+        echo '<button class="button button-primary" type="submit" name="np_order_hub_create_reklamasjon" value="1">Opprett reklamasjonsordre</button>';
         echo '</p>';
         echo '</form>';
         echo '</div>';
@@ -1650,20 +1886,20 @@ function np_order_hub_order_details_page() {
     echo '</div>';
 
     echo '<div class="postbox">';
-    echo '<h2 class="hndle">Items</h2>';
+    echo '<h2 class="hndle">Produktmeta</h2>';
     echo '<div class="inside">';
     echo '<table class="widefat striped">';
     echo '<thead><tr>';
-    echo '<th>Product</th>';
+    echo '<th>Produkt</th>';
     echo '<th>Qty</th>';
-    echo '<th>Line Total</th>';
+    echo '<th>Linjesum</th>';
     echo '<th>SKU</th>';
-    echo '<th>Details</th>';
+    echo '<th>Detaljer</th>';
     echo '</tr></thead>';
     echo '<tbody>';
 
     if (empty($line_items)) {
-        echo '<tr><td colspan="5">No line items found.</td></tr>';
+        echo '<tr><td colspan="5">Ingen varelinjer funnet.</td></tr>';
     } else {
         foreach ($line_items as $item) {
             if (!is_array($item)) {

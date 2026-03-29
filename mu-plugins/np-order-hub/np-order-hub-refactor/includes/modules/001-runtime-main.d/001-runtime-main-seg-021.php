@@ -164,16 +164,16 @@ function np_order_hub_maybe_notify_new_order($store, $order_number, $order_id, $
 
 function np_order_hub_get_allowed_statuses() {
     return array(
-        'pending' => 'Pending',
-        'processing' => 'Processing',
+        'pending' => 'Avventer betaling',
+        'processing' => 'Behandler',
         'restordre' => 'Restordre',
         'bytte-storrelse' => 'Bytte størrelse',
-        'completed' => 'Completed',
-        'on-hold' => 'On-hold',
-        'cancelled' => 'Cancelled',
-        'refunded' => 'Refunded',
+        'completed' => 'Fullført',
+        'on-hold' => 'På vent',
+        'cancelled' => 'Kansellert',
+        'refunded' => 'Refundert',
         'reklamasjon' => 'Reklamasjon',
-        'failed' => 'Failed',
+        'failed' => 'Mislyktes',
     );
 }
 

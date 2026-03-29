@@ -1,4 +1,161 @@
 <?php
+function np_order_hub_wpo_selected_class_meta_keys() {
+    return array(
+        'selected_class',
+        '_selected_class',
+        'selected_class_name',
+        'selected_class_value',
+        'selected class',
+        'selected class:',
+        'klasse',
+        'klasse:',
+        'np_selected_class',
+        '_np_selected_class',
+        'school_class',
+        'class_selection',
+        '_class_selection',
+        '_class',
+        'class',
+    );
+}
+
+function np_order_hub_wpo_normalize_selected_class_key($key) {
+    $key = strtolower(trim(wp_strip_all_tags((string) $key)));
+    $key = str_replace(array('-', ':', '  '), array('_', '', ' '), $key);
+    $key = preg_replace('/\s+/', '_', $key);
+    return is_string($key) ? $key : '';
+}
+
+function np_order_hub_wpo_is_selected_class_meta_key($key) {
+    $normalized = np_order_hub_wpo_normalize_selected_class_key($key);
+    if ($normalized === '') {
+        return false;
+    }
+
+    $keys = array_map('np_order_hub_wpo_normalize_selected_class_key', np_order_hub_wpo_selected_class_meta_keys());
+    return in_array($normalized, $keys, true);
+}
+
+function np_order_hub_wpo_clean_selected_class_text($value) {
+    if (is_array($value)) {
+        foreach ($value as $item) {
+            $found = np_order_hub_wpo_clean_selected_class_text($item);
+            if ($found !== '') {
+                return $found;
+            }
+        }
+        return '';
+    }
+
+    if (is_object($value)) {
+        if (method_exists($value, 'get_data')) {
+            return np_order_hub_wpo_clean_selected_class_text($value->get_data());
+        }
+        return np_order_hub_wpo_clean_selected_class_text((array) $value);
+    }
+
+    if (!is_scalar($value)) {
+        return '';
+    }
+
+    $text = trim(wp_strip_all_tags((string) $value));
+    if ($text === '') {
+        return '';
+    }
+
+    if (preg_match('/(?:selected\s*class|klasse)\s*:?\s*(.+)$/iu', $text, $matches)) {
+        $text = trim((string) $matches[1]);
+    }
+
+    return sanitize_text_field($text);
+}
+
+function np_order_hub_wpo_get_selected_class_payload($order) {
+    if (!$order || !is_a($order, 'WC_Order')) {
+        return '';
+    }
+
+    if (function_exists('np_ps_get_selected_class')) {
+        $selected_class = np_order_hub_wpo_clean_selected_class_text(np_ps_get_selected_class($order));
+        if ($selected_class !== '') {
+            return $selected_class;
+        }
+    }
+
+    foreach (np_order_hub_wpo_selected_class_meta_keys() as $meta_key) {
+        $post_meta_value = np_order_hub_wpo_clean_selected_class_text(get_post_meta((int) $order->get_id(), $meta_key, true));
+        if ($post_meta_value !== '') {
+            return $post_meta_value;
+        }
+        $value = np_order_hub_wpo_clean_selected_class_text($order->get_meta($meta_key, true));
+        if ($value !== '') {
+            return $value;
+        }
+    }
+
+    foreach ((array) $order->get_meta_data() as $meta) {
+        if (!is_object($meta) || !method_exists($meta, 'get_data')) {
+            continue;
+        }
+        $data = $meta->get_data();
+        if (!is_array($data)) {
+            continue;
+        }
+        $key = (string) ($data['key'] ?? '');
+        $value = $data['value'] ?? '';
+        if (np_order_hub_wpo_is_selected_class_meta_key($key)) {
+            $selected_class = np_order_hub_wpo_clean_selected_class_text($value);
+            if ($selected_class !== '') {
+                return $selected_class;
+            }
+        }
+        $selected_class = np_order_hub_wpo_clean_selected_class_text($value);
+        if ($selected_class !== '' && preg_match('/(?:selected\s*class|klasse)/iu', (string) $value)) {
+            return $selected_class;
+        }
+    }
+
+    foreach ($order->get_items('line_item') as $item) {
+        if (!$item || !is_a($item, 'WC_Order_Item_Product')) {
+            continue;
+        }
+        foreach ((array) $item->get_meta_data() as $meta) {
+            if (!is_object($meta) || !method_exists($meta, 'get_data')) {
+                continue;
+            }
+            $data = $meta->get_data();
+            if (!is_array($data)) {
+                continue;
+            }
+            $key = (string) ($data['key'] ?? '');
+            $value = $data['value'] ?? '';
+            if (np_order_hub_wpo_is_selected_class_meta_key($key)) {
+                $selected_class = np_order_hub_wpo_clean_selected_class_text($value);
+                if ($selected_class !== '') {
+                    return $selected_class;
+                }
+            }
+            $selected_class = np_order_hub_wpo_clean_selected_class_text($value);
+            if ($selected_class !== '' && preg_match('/(?:selected\s*class|klasse)/iu', (string) $value)) {
+                return $selected_class;
+            }
+        }
+    }
+
+    $address_candidates = array(
+        method_exists($order, 'get_formatted_billing_address') ? (string) $order->get_formatted_billing_address() : '',
+        method_exists($order, 'get_formatted_shipping_address') ? (string) $order->get_formatted_shipping_address() : '',
+    );
+    foreach ($address_candidates as $candidate) {
+        $selected_class = np_order_hub_wpo_clean_selected_class_text($candidate);
+        if ($selected_class !== '' && preg_match('/(?:selected\s*class|klasse)/iu', $candidate)) {
+            return $selected_class;
+        }
+    }
+
+    return '';
+}
+
 function np_order_hub_wpo_get_live_order_payload($order) {
     if (!$order || !is_a($order, 'WC_Order')) {
         return array();
@@ -13,22 +170,36 @@ function np_order_hub_wpo_get_live_order_payload($order) {
     $payload['shipping'] = is_array($order->get_address('shipping')) ? $order->get_address('shipping') : array();
     $payload['customer_note'] = (string) $order->get_customer_note();
     $payload['order_notes'] = np_order_hub_wpo_get_order_notes_payload($order);
+    $payload['selected_class'] = np_order_hub_wpo_get_selected_class_payload($order);
     $payload['email_actions'] = np_order_hub_wpo_get_allowed_email_actions();
 
     return $payload;
 }
 
 function np_order_hub_wpo_get_order_notes_payload($order) {
-    if (!$order || !is_a($order, 'WC_Order') || !function_exists('wc_get_order_notes')) {
+    if (!$order || !is_a($order, 'WC_Order')) {
         return array();
     }
 
-    $notes = wc_get_order_notes(array(
-        'order_id' => (int) $order->get_id(),
-        'limit' => 20,
-        'orderby' => 'date_created_gmt',
-        'order' => 'DESC',
-    ));
+    $notes = array();
+    if (function_exists('wc_get_order_notes')) {
+        $notes = wc_get_order_notes(array(
+            'order_id' => (int) $order->get_id(),
+            'limit' => 20,
+            'orderby' => 'date_created_gmt',
+            'order' => 'DESC',
+        ));
+    }
+    if ((!is_array($notes) || empty($notes)) && function_exists('get_comments')) {
+        $notes = get_comments(array(
+            'post_id' => (int) $order->get_id(),
+            'type' => 'order_note',
+            'status' => 'approve',
+            'number' => 20,
+            'orderby' => 'comment_date_gmt',
+            'order' => 'DESC',
+        ));
+    }
     if (!is_array($notes)) {
         return array();
     }
@@ -41,6 +212,8 @@ function np_order_hub_wpo_get_order_notes_payload($order) {
         $content = '';
         if (method_exists($note, 'get_content')) {
             $content = (string) $note->get_content();
+        } elseif (isset($note->comment_content)) {
+            $content = (string) $note->comment_content;
         } elseif (isset($note->content)) {
             $content = (string) $note->content;
         }
@@ -52,6 +225,8 @@ function np_order_hub_wpo_get_order_notes_payload($order) {
         $date_created_gmt = '';
         if (method_exists($note, 'get_date_created')) {
             $date_created_gmt = np_order_hub_wpo_iso_datetime($note->get_date_created(), true);
+        } elseif (isset($note->comment_date_gmt)) {
+            $date_created_gmt = trim((string) $note->comment_date_gmt);
         } elseif (isset($note->date_created_gmt)) {
             $date_created_gmt = trim((string) $note->date_created_gmt);
         }
@@ -59,15 +234,31 @@ function np_order_hub_wpo_get_order_notes_payload($order) {
         $added_by = '';
         if (method_exists($note, 'get_added_by')) {
             $added_by = (string) $note->get_added_by();
+        } elseif (isset($note->comment_author)) {
+            $added_by = (string) $note->comment_author;
         } elseif (isset($note->added_by)) {
             $added_by = (string) $note->added_by;
+        }
+
+        $is_customer_note = method_exists($note, 'get_customer_note')
+            ? (bool) $note->get_customer_note()
+            : (!empty($note->customer_note));
+        if (!$is_customer_note && isset($note->comment_ID)) {
+            $is_customer_note = get_comment_meta((int) $note->comment_ID, 'is_customer_note', true) === '1';
+        }
+
+        $added_by_user = method_exists($note, 'get_added_by_user')
+            ? (bool) $note->get_added_by_user()
+            : (!empty($note->added_by_user));
+        if (!$added_by_user && isset($note->user_id)) {
+            $added_by_user = ((int) $note->user_id) > 0;
         }
 
         $items[] = array(
             'id' => method_exists($note, 'get_id') ? (int) $note->get_id() : (isset($note->id) ? (int) $note->id : 0),
             'note' => $content,
-            'is_customer_note' => method_exists($note, 'get_customer_note') ? (bool) $note->get_customer_note() : (!empty($note->customer_note)),
-            'added_by_user' => method_exists($note, 'get_added_by_user') ? (bool) $note->get_added_by_user() : (!empty($note->added_by_user)),
+            'is_customer_note' => $is_customer_note,
+            'added_by_user' => $added_by_user,
             'added_by' => sanitize_text_field($added_by),
             'date_created_gmt' => $date_created_gmt,
         );
