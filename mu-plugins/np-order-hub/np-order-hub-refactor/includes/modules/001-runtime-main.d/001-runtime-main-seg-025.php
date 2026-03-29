@@ -310,34 +310,34 @@ function np_order_hub_render_order_editor_address_fields($prefix, $values, $type
     $values = is_array($values) ? $values : array();
     $type = $type === 'shipping' ? 'shipping' : 'billing';
     $fields = array(
-        'first_name' => 'First name',
-        'last_name' => 'Last name',
-        'company' => 'Company',
-        'address_1' => 'Address line 1',
-        'address_2' => 'Address line 2',
-        'postcode' => 'Postcode',
-        'city' => 'City',
-        'state' => 'State / county',
-        'country' => 'Country',
+        'first_name' => 'Fornavn',
+        'last_name' => 'Etternavn',
+        'company' => 'Firma',
+        'address_1' => 'Adresse 1',
+        'address_2' => 'Adresse 2',
+        'postcode' => 'Postnummer',
+        'city' => 'Poststed',
+        'state' => 'Fylke',
+        'country' => 'Land',
     );
     if ($type === 'billing') {
-        $fields['email'] = 'Email';
-        $fields['phone'] = 'Phone';
+        $fields['email'] = 'E-postadresse';
+        $fields['phone'] = 'Telefon';
     } else {
-        $fields['phone'] = 'Phone';
+        $fields['phone'] = 'Telefon';
     }
 
-    echo '<table class="form-table" style="margin-top:0;">';
+    echo '<div class="np-oh-address-fields">';
     foreach ($fields as $field => $label) {
         $field_id = 'np-order-hub-' . esc_attr($prefix . '-' . $field);
         $name = 'order_' . $prefix . '[' . $field . ']';
         $value = isset($values[$field]) ? (string) $values[$field] : '';
-        echo '<tr>';
-        echo '<th scope="row"><label for="' . $field_id . '">' . esc_html($label) . '</label></th>';
-        echo '<td><input id="' . $field_id . '" name="' . esc_attr($name) . '" type="text" class="regular-text" value="' . esc_attr($value) . '" /></td>';
-        echo '</tr>';
+        echo '<label class="np-oh-field" for="' . $field_id . '">';
+        echo '<span class="np-oh-field-label">' . esc_html($label) . '</span>';
+        echo '<input id="' . $field_id . '" name="' . esc_attr($name) . '" type="text" class="np-oh-text-input" value="' . esc_attr($value) . '" />';
+        echo '</label>';
     }
-    echo '</table>';
+    echo '</div>';
 }
 
 function np_order_hub_render_order_editor_notes_list($notes) {
@@ -376,8 +376,10 @@ function np_order_hub_render_order_editor_notes_list($notes) {
 
 function np_order_hub_render_order_editor_styles() {
     echo '<style>
-        .np-oh-editor-screen.wrap{max-width:1380px}
+        .np-oh-editor-screen.wrap{max-width:1440px}
         .np-oh-editor-screen .np-oh-poststuff{padding-top:0}
+        .np-oh-editor-screen .wp-heading-inline{margin-bottom:6px}
+        .np-oh-editor-screen .np-oh-order-header-meta{margin:8px 0 18px;color:#50575e;font-size:14px}
         body.np-oh-editor-screen-body #post-body,
         body.np-oh-editor-screen-body #post-body.metabox-holder,
         body.np-oh-editor-screen-body #post-body.metabox-holder.columns-2{
@@ -405,20 +407,25 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .np-oh-sidebar-column{grid-area:sidebar;width:280px!important;max-width:280px;min-width:0}
         .np-oh-editor-screen .np-oh-main-column{grid-area:main;min-width:0}
         .np-oh-editor-screen .np-oh-sidebar-actions{width:100%}
-        .np-oh-editor-screen .postbox{margin:0 0 16px}
+        .np-oh-editor-screen .postbox{margin:0 0 16px;border:1px solid #dcdcde;box-shadow:none}
         .np-oh-editor-screen .postbox .hndle{margin:0;padding:11px 12px;border-bottom:1px solid #ccd0d4;font-size:13px;font-weight:600}
         .np-oh-editor-screen .inside{margin:0;padding:12px}
-        .np-oh-editor-screen .order_data_column_container{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+        .np-oh-editor-screen .order_data_column_container{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
         .np-oh-editor-screen .order_data_column h3,
         .np-oh-editor-screen .np-oh-items-section h3,
         .np-oh-editor-screen .np-oh-notes-grid h3{margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid #eee;font-size:13px}
         .np-oh-editor-screen .np-oh-readonly-list p{margin:0 0 8px}
+        .np-oh-editor-screen .np-oh-readonly-list p:last-child{margin-bottom:0}
+        .np-oh-editor-screen .np-oh-summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px}
+        .np-oh-editor-screen .np-oh-summary-grid p{margin:0}
         .np-oh-editor-screen .np-oh-two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
         .np-oh-editor-screen .np-oh-item-summary{display:flex;gap:12px;align-items:flex-start}
-        .np-oh-editor-screen .np-oh-item-thumb img{display:block;width:44px;height:44px;object-fit:cover;border:1px solid #ccd0d4;border-radius:2px;background:#fff}
-        .np-oh-editor-screen .np-oh-item-copy strong{display:block;margin-bottom:4px}
-        .np-oh-editor-screen .np-oh-item-meta{margin:6px 0 0 18px}
-        .np-oh-editor-screen .np-oh-item-meta li{margin:0 0 4px}
+        .np-oh-editor-screen .np-oh-item-thumb img{display:block;width:60px;height:60px;object-fit:cover;border:1px solid #ccd0d4;border-radius:2px;background:#fff}
+        .np-oh-editor-screen .np-oh-item-title{display:block;margin-bottom:6px;font-size:16px;line-height:1.35;color:#2271b1}
+        .np-oh-editor-screen .np-oh-item-detail{margin:0 0 6px;color:#1d2327}
+        .np-oh-editor-screen .np-oh-item-detail strong{font-weight:600;color:#50575e}
+        .np-oh-editor-screen .np-oh-item-meta{margin:8px 0 0 0;padding:0;list-style:none}
+        .np-oh-editor-screen .np-oh-item-meta li{margin:0 0 5px;color:#1d2327}
         .np-oh-editor-screen .np-oh-qty-input{width:76px}
         .np-oh-editor-screen .np-oh-amount{text-align:right;white-space:nowrap}
         .np-oh-editor-screen .np-oh-items-table td,
@@ -429,20 +436,38 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .np-oh-items-table .column-cost,
         .np-oh-editor-screen .np-oh-items-table .column-qty,
         .np-oh-editor-screen .np-oh-items-table .column-total{width:110px}
+        .np-oh-editor-screen .np-oh-woo-items-table th{font-weight:500;color:#646970}
+        .np-oh-editor-screen .np-oh-woo-items-table td{padding-top:18px;padding-bottom:18px}
+        .np-oh-editor-screen .np-oh-charge-lines{margin-top:12px;border-top:1px solid #dcdcde}
+        .np-oh-editor-screen .np-oh-charge-line{display:flex;justify-content:space-between;gap:16px;padding:16px 0;border-bottom:1px solid #f0f0f1}
+        .np-oh-editor-screen .np-oh-charge-line-title{font-weight:600}
+        .np-oh-editor-screen .np-oh-charge-line-meta{display:block;margin-top:6px;color:#646970}
+        .np-oh-editor-screen .np-oh-order-totals-wrap{display:flex;justify-content:flex-end;margin-top:18px}
+        .np-oh-editor-screen .np-oh-order-totals{width:100%;max-width:360px;border-top:2px solid #dcdcde;padding-top:10px}
+        .np-oh-editor-screen .np-oh-order-total-row{display:flex;justify-content:space-between;gap:18px;padding:6px 0}
+        .np-oh-editor-screen .np-oh-order-total-row strong{font-weight:600}
+        .np-oh-editor-screen .np-oh-order-total-row.is-paid{border-top:1px solid #dcdcde;margin-top:6px;padding-top:10px}
+        .np-oh-editor-screen .np-oh-payment-note{margin:10px 0 0;color:#50575e;text-align:right}
+        .np-oh-editor-screen .np-oh-advanced-edit{margin-top:18px;border-top:1px solid #dcdcde;padding-top:16px}
+        .np-oh-editor-screen .np-oh-advanced-edit summary{cursor:pointer;font-weight:600}
         .np-oh-editor-screen .np-oh-sidebar-form + .np-oh-sidebar-form{margin-top:14px;padding-top:14px;border-top:1px solid #eee}
         .np-oh-editor-screen .np-oh-sidebar-actions .button{margin:0 8px 8px 0}
         .np-oh-editor-screen .np-oh-sidebar-actions select,
         .np-oh-editor-screen .np-oh-sidebar-actions input[type=text]{width:100%}
+        .np-oh-editor-screen .np-oh-address-fields{display:grid;gap:12px}
+        .np-oh-editor-screen .np-oh-field{display:block}
+        .np-oh-editor-screen .np-oh-field-label{display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:#50575e}
+        .np-oh-editor-screen .np-oh-text-input,
+        .np-oh-editor-screen .regular-text,
+        .np-oh-editor-screen .large-text,
+        .np-oh-editor-screen textarea,
+        .np-oh-editor-screen select{width:100%;max-width:100%}
         .np-oh-editor-screen .np-oh-meta-list{margin:0}
         .np-oh-editor-screen .np-oh-meta-list dt{font-weight:600;margin:0 0 4px}
         .np-oh-editor-screen .np-oh-meta-list dd{margin:0 0 12px}
         .np-oh-editor-screen .np-oh-panel-actions .button-link-delete{padding:0}
         .np-oh-editor-screen .form-table th{width:120px;padding-left:0}
         .np-oh-editor-screen .form-table td{padding-right:0}
-        .np-oh-editor-screen .regular-text,
-        .np-oh-editor-screen .large-text,
-        .np-oh-editor-screen textarea,
-        .np-oh-editor-screen select{max-width:100%}
         .np-oh-editor-screen .np-oh-order-notes{margin:0;padding:0;list-style:none}
         .np-oh-editor-screen .np-oh-order-note{margin:0 0 12px;padding:10px 12px;background:#f6f7f7;border:1px solid #dcdcde;border-radius:3px}
         .np-oh-editor-screen .np-oh-order-note-meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;font-size:12px;color:#50575e}
@@ -466,33 +491,121 @@ function np_order_hub_render_order_editor_styles() {
     </style>';
 }
 
+function np_order_hub_get_order_editor_item_meta_map($item) {
+    $map = array();
+    $meta_data = isset($item['meta_data']) && is_array($item['meta_data']) ? $item['meta_data'] : array();
+    foreach ($meta_data as $meta) {
+        if (!is_array($meta)) {
+            continue;
+        }
+        $key = trim((string) ($meta['display_key'] ?? $meta['key'] ?? ''));
+        if ($key === '' || strpos($key, '_') === 0) {
+            continue;
+        }
+        $value = $meta['display_value'] ?? $meta['value'] ?? '';
+        if (is_array($value) || is_object($value)) {
+            $value = wp_json_encode($value);
+        }
+        $value = trim((string) $value);
+        if ($value === '') {
+            continue;
+        }
+        $map[$key] = wp_strip_all_tags($value);
+    }
+    return $map;
+}
+
+function np_order_hub_get_order_editor_customer_label($live_order) {
+    $customer_id = is_array($live_order) ? absint($live_order['customer_id'] ?? 0) : 0;
+    if ($customer_id > 0) {
+        return '#' . $customer_id;
+    }
+    return 'Gjest';
+}
+
+function np_order_hub_get_order_editor_status_label($status, $allowed_statuses = array()) {
+    $status = sanitize_key((string) $status);
+    if ($status !== '' && isset($allowed_statuses[$status])) {
+        return (string) $allowed_statuses[$status];
+    }
+    return $status !== '' ? ucwords(str_replace('-', ' ', $status)) : '—';
+}
+
+function np_order_hub_render_order_editor_totals_summary($live_order, $currency) {
+    $live_order = is_array($live_order) ? $live_order : array();
+    $currency = (string) $currency;
+    $items_subtotal = 0.0;
+    foreach ((array) ($live_order['line_items'] ?? array()) as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        $value = np_order_hub_parse_numeric_value($item['subtotal'] ?? $item['total'] ?? null);
+        $items_subtotal += $value !== null ? (float) $value : 0.0;
+    }
+
+    $shipping_total = np_order_hub_parse_numeric_value($live_order['shipping_total'] ?? null);
+    $discount_total = np_order_hub_parse_numeric_value($live_order['discount_total'] ?? null);
+    $total_tax = np_order_hub_parse_numeric_value($live_order['total_tax'] ?? null);
+    $grand_total = np_order_hub_parse_numeric_value($live_order['total'] ?? null);
+    $date_paid_gmt = np_order_hub_parse_datetime_gmt($live_order['date_paid_gmt'] ?? '', $live_order['date_paid'] ?? '');
+    $date_paid_label = $date_paid_gmt !== '' ? get_date_from_gmt($date_paid_gmt, 'd.m.Y \\k\\l H:i') : '';
+    $payment_method_title = trim((string) ($live_order['payment_method_title'] ?? ''));
+
+    echo '<div class="np-oh-order-totals-wrap">';
+    echo '<div class="np-oh-order-totals">';
+    echo '<div class="np-oh-order-total-row"><span>Produktsum:</span><strong>' . esc_html(np_order_hub_format_money($items_subtotal, $currency)) . '</strong></div>';
+    echo '<div class="np-oh-order-total-row"><span>Frakt:</span><strong>' . esc_html(np_order_hub_format_money($shipping_total !== null ? $shipping_total : 0, $currency)) . '</strong></div>';
+    if ($discount_total !== null && abs($discount_total) > 0.0001) {
+        echo '<div class="np-oh-order-total-row"><span>Rabatt:</span><strong>-' . esc_html(np_order_hub_format_money(abs($discount_total), $currency)) . '</strong></div>';
+    }
+    if ($total_tax !== null && abs($total_tax) > 0.0001) {
+        echo '<div class="np-oh-order-total-row"><span>MVA:</span><strong>' . esc_html(np_order_hub_format_money($total_tax, $currency)) . '</strong></div>';
+    }
+    echo '<div class="np-oh-order-total-row"><span>Ordretotal:</span><strong>' . esc_html(np_order_hub_format_money($grand_total !== null ? $grand_total : 0, $currency)) . '</strong></div>';
+    echo '<div class="np-oh-order-total-row is-paid"><span>Betalt:</span><strong>' . esc_html(np_order_hub_format_money($grand_total !== null ? $grand_total : 0, $currency)) . '</strong></div>';
+    if ($date_paid_label !== '' || $payment_method_title !== '') {
+        $payment_bits = array();
+        if ($date_paid_label !== '') {
+            $payment_bits[] = $date_paid_label;
+        }
+        if ($payment_method_title !== '') {
+            $payment_bits[] = 'via ' . $payment_method_title;
+        }
+        echo '<p class="np-oh-payment-note">' . esc_html(implode(' ', $payment_bits)) . '</p>';
+    }
+    echo '</div>';
+    echo '</div>';
+}
+
 function np_order_hub_render_order_editor_item_summary($item) {
     $item = is_array($item) ? $item : array();
     $name = isset($item['name']) ? (string) $item['name'] : 'Item';
     $sku = trim((string) ($item['sku'] ?? ''));
     $parent_name = trim((string) ($item['parent_name'] ?? ''));
+    $variation_id = absint($item['variation_id'] ?? 0);
     $image_src = '';
     if (!empty($item['image']) && is_array($item['image']) && !empty($item['image']['src'])) {
         $image_src = esc_url((string) $item['image']['src']);
     }
-    $meta_lines = np_order_hub_format_meta_lines(isset($item['meta_data']) ? $item['meta_data'] : array());
+    $meta_map = np_order_hub_get_order_editor_item_meta_map($item);
+    $title = $parent_name !== '' ? $parent_name : $name;
 
     echo '<div class="np-oh-item-summary">';
     if ($image_src !== '') {
         echo '<div class="np-oh-item-thumb"><img src="' . $image_src . '" alt="" /></div>';
     }
     echo '<div class="np-oh-item-copy">';
-    echo '<strong>' . esc_html($name) . '</strong>';
-    if ($parent_name !== '' && $parent_name !== $name) {
-        echo '<div class="description">Parent: ' . esc_html($parent_name) . '</div>';
-    }
+    echo '<span class="np-oh-item-title">' . esc_html($title) . '</span>';
     if ($sku !== '') {
-        echo '<div class="description">SKU: ' . esc_html($sku) . '</div>';
+        echo '<div class="np-oh-item-detail"><strong>Produktnummer:</strong> ' . esc_html($sku) . '</div>';
     }
-    if (!empty($meta_lines)) {
+    if ($variation_id > 0) {
+        echo '<div class="np-oh-item-detail"><strong>Variant-ID:</strong> ' . esc_html((string) $variation_id) . '</div>';
+    }
+    if (!empty($meta_map)) {
         echo '<ul class="np-oh-item-meta">';
-        foreach ($meta_lines as $meta_line) {
-            echo '<li>' . esc_html($meta_line) . '</li>';
+        foreach ($meta_map as $meta_key => $meta_value) {
+            echo '<li><strong>' . esc_html($meta_key) . ':</strong> ' . esc_html($meta_value) . '</li>';
         }
         echo '</ul>';
     }
@@ -950,8 +1063,6 @@ function np_order_hub_order_details_page() {
     $customer_note_value = isset($live_order['customer_note']) ? (string) $live_order['customer_note'] : $customer_note_value;
 
     echo '<div class="wrap woocommerce np-oh-editor-screen">';
-    echo '<h1>Order Details</h1>';
-    echo '<p><a href="' . esc_url(admin_url('admin.php?page=np-order-hub')) . '">&larr; Back to orders</a></p>';
 
     if (!empty($status_notice) && is_array($status_notice)) {
         $type = $status_notice['type'] === 'success' ? 'updated' : 'error';
@@ -1002,7 +1113,7 @@ function np_order_hub_order_details_page() {
     }
 
     if (!$record) {
-        echo '<div class="error"><p>Order not found.</p></div>';
+        echo '<div class="error"><p>Ordren ble ikke funnet.</p></div>';
         echo '</div>';
         return;
     }
@@ -1012,7 +1123,6 @@ function np_order_hub_order_details_page() {
     if (!empty($record['date_created_gmt']) && $record['date_created_gmt'] !== '0000-00-00 00:00:00') {
         $date_label = get_date_from_gmt($record['date_created_gmt'], 'd.m.y');
     }
-    $status_label = $record['status'] !== '' ? ucwords(str_replace('-', ' ', $record['status'])) : '';
     $currency = $record['currency'] !== '' ? $record['currency'] : (isset($payload['currency']) ? (string) $payload['currency'] : '');
     $total = isset($payload['total']) ? (float) $payload['total'] : (float) $record['total'];
     $total_display = trim(number_format_i18n($total, 2) . ' ' . $currency);
@@ -1034,17 +1144,38 @@ function np_order_hub_order_details_page() {
     $payment_method_title = trim((string) ($live_order['payment_method_title'] ?? ''));
     $transaction_id = trim((string) ($live_order['transaction_id'] ?? ''));
     $created_via = trim((string) ($live_order['created_via'] ?? ''));
+    $customer_ip_address = trim((string) ($live_order['customer_ip_address'] ?? ''));
+    $date_paid_label = '';
+    $date_paid_gmt = np_order_hub_parse_datetime_gmt($live_order['date_paid_gmt'] ?? '', $live_order['date_paid'] ?? '');
+    if ($date_paid_gmt !== '') {
+        $date_paid_label = get_date_from_gmt($date_paid_gmt, 'd.m.Y \\k\\l H:i');
+    }
+    $status_label = np_order_hub_get_order_editor_status_label($record['status'] ?? '', $allowed_statuses);
+    $customer_label = np_order_hub_get_order_editor_customer_label($live_order);
     $linked_cases = np_order_hub_help_scout_get_cases_for_record((int) $record['id']);
+    $header_bits = array();
+    if ($payment_method_title !== '') {
+        $header_bits[] = 'Betaling via ' . $payment_method_title . ($transaction_id !== '' ? ' (' . $transaction_id . ')' : '');
+    }
+    if ($date_paid_label !== '') {
+        $header_bits[] = 'Betalt ' . $date_paid_label;
+    }
+    if ($customer_ip_address !== '') {
+        $header_bits[] = 'Kunde-IP: ' . $customer_ip_address;
+    }
 
     np_order_hub_render_order_editor_styles();
-    echo '<h1 class="wp-heading-inline">Edit order ' . esc_html($order_label) . '</h1>';
-    echo '<a class="page-title-action" href="' . esc_url(admin_url('admin.php?page=np-order-hub')) . '">Back to hub</a>';
+    echo '<h1 class="wp-heading-inline">Ordre nr. ' . esc_html(ltrim($order_label, '#')) . ' – Detaljer</h1>';
+    echo '<a class="page-title-action" href="' . esc_url(admin_url('admin.php?page=np-order-hub')) . '">Tilbake til hub</a>';
+    if (!empty($header_bits)) {
+        echo '<p class="np-oh-order-header-meta">' . esc_html(implode('. ', $header_bits)) . '</p>';
+    }
     echo '<div class="np-oh-poststuff">';
     echo '<div class="np-oh-layout">';
     echo '<div class="np-oh-sidebar-column">';
 
     echo '<div class="postbox">';
-    echo '<h2 class="hndle">Order actions</h2>';
+    echo '<h2 class="hndle">Handlinger</h2>';
     echo '<div class="inside np-oh-sidebar-actions">';
     if (!empty($allowed_statuses)) {
         echo '<form class="np-oh-sidebar-form" method="post">';
@@ -1057,9 +1188,9 @@ function np_order_hub_order_details_page() {
             echo '<option value="' . esc_attr($key) . '"' . $selected . '>' . esc_html($label) . '</option>';
         }
         echo '</select>';
-        echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_status" value="1">Update</button></p>';
+        echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_status" value="1">Oppdater</button></p>';
         if ($token_missing) {
-            echo '<p class="description">Store token missing in hub store settings.</p>';
+            echo '<p class="description">Butikktoken mangler i hub-innstillingene.</p>';
         }
         echo '</form>';
     }
@@ -1067,42 +1198,42 @@ function np_order_hub_order_details_page() {
     echo '<form class="np-oh-sidebar-form" method="post">';
     wp_nonce_field('np_order_hub_update_delivery_bucket');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
-    echo '<p><label for="np-order-hub-delivery-bucket"><strong>Delivery bucket</strong></label></p>';
+    echo '<p><label for="np-order-hub-delivery-bucket"><strong>Leveringsbøtte</strong></label></p>';
     echo '<select name="delivery_bucket" id="np-order-hub-delivery-bucket">';
     echo '<option value="standard"' . selected($delivery_bucket, 'standard', false) . '>Levering 3-5 dager</option>';
     echo '<option value="scheduled"' . selected($delivery_bucket, 'scheduled', false) . '>Levering til bestemt dato</option>';
     echo '</select>';
-    echo '<p><button class="button" type="submit" name="np_order_hub_update_delivery_bucket" value="1">Update</button></p>';
+    echo '<p><button class="button" type="submit" name="np_order_hub_update_delivery_bucket" value="1">Oppdater</button></p>';
     echo '</form>';
 
     echo '<form class="np-oh-sidebar-form" method="post">';
     wp_nonce_field('np_order_hub_send_order_email');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
-    echo '<p><label for="np-order-hub-email-action"><strong>Woo email</strong></label></p>';
+    echo '<p><label for="np-order-hub-email-action"><strong>Woo e-post</strong></label></p>';
     echo '<select name="order_email_action" id="np-order-hub-email-action">';
     foreach ($email_actions as $action_key => $action_label) {
         echo '<option value="' . esc_attr((string) $action_key) . '"' . selected($order_email_action_value, (string) $action_key, false) . '>' . esc_html((string) $action_label) . '</option>';
     }
     echo '</select>';
-    echo '<p><button class="button" type="submit" name="np_order_hub_send_order_email" value="1">Send email</button></p>';
+    echo '<p><button class="button" type="submit" name="np_order_hub_send_order_email" value="1">Send e-post</button></p>';
     echo '</form>';
 
     echo '<div class="np-oh-sidebar-form">';
     if ($packing_url !== '') {
-        echo '<a class="button" href="' . esc_url($packing_url) . '" target="_blank" rel="noopener">Packing slip</a>';
+        echo '<a class="button" href="' . esc_url($packing_url) . '" target="_blank" rel="noopener">Pakkseddel</a>';
     }
     if ($open_order_url !== '') {
-        echo '<a class="button button-primary" href="' . esc_url($open_order_url) . '" target="_blank" rel="noopener">Open in store</a>';
+        echo '<a class="button button-primary" href="' . esc_url($open_order_url) . '" target="_blank" rel="noopener">Åpne i butikk</a>';
     }
     echo '<form method="post" style="margin-top:8px;">';
     wp_nonce_field('np_order_hub_refresh_live_order');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
-    echo '<button class="button" type="submit" name="np_order_hub_refresh_live_order" value="1">Refresh live data</button>';
+    echo '<button class="button" type="submit" name="np_order_hub_refresh_live_order" value="1">Oppdater live-data</button>';
     echo '</form>';
     echo '<form method="post" style="margin-top:8px;">';
     wp_nonce_field('np_order_hub_delete_record');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
-    echo '<button class="button-link-delete" type="submit" name="np_order_hub_delete_record" value="1" onclick="return confirm(\'Remove this order from the hub?\');">Delete from hub</button>';
+    echo '<button class="button-link-delete" type="submit" name="np_order_hub_delete_record" value="1" onclick="return confirm(\'Slette denne ordren fra huben?\');">Slett fra hub</button>';
     echo '</form>';
     echo '</div>';
     echo '</div>';
@@ -1146,28 +1277,28 @@ function np_order_hub_order_details_page() {
     echo '</div>';
 
     echo '<div class="postbox">';
-    echo '<h2 class="hndle">Customer note</h2>';
+    echo '<h2 class="hndle">Kundenotat</h2>';
     echo '<div class="inside">';
     echo '<form method="post">';
     wp_nonce_field('np_order_hub_update_customer_note');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
     echo '<textarea name="customer_note" rows="5" class="large-text">' . esc_textarea($customer_note_value) . '</textarea>';
-    echo '<p><button class="button" type="submit" name="np_order_hub_update_customer_note" value="1">Save customer note</button></p>';
+    echo '<p><button class="button" type="submit" name="np_order_hub_update_customer_note" value="1">Lagre kundenotat</button></p>';
     echo '</form>';
     echo '</div>';
     echo '</div>';
 
     echo '<div class="postbox">';
-    echo '<h2 class="hndle">Order notes</h2>';
+    echo '<h2 class="hndle">Ordrenotater</h2>';
     echo '<div class="inside">';
-    echo '<h3>Add note</h3>';
+    echo '<h3>Legg til notat</h3>';
     echo '<form method="post">';
     wp_nonce_field('np_order_hub_add_order_note');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
     echo '<textarea name="order_note" rows="5" class="large-text">' . esc_textarea($order_note_form_value) . '</textarea>';
-    echo '<p><button class="button" type="submit" name="np_order_hub_add_order_note" value="1">Add note</button></p>';
+    echo '<p><button class="button" type="submit" name="np_order_hub_add_order_note" value="1">Legg til notat</button></p>';
     echo '</form>';
-    echo '<h3 style="margin-top:24px;">Recent notes</h3>';
+    echo '<h3 style="margin-top:24px;">Siste notater</h3>';
     np_order_hub_render_order_editor_notes_list($order_notes);
     echo '</div>';
     echo '</div>';
@@ -1177,56 +1308,65 @@ function np_order_hub_order_details_page() {
     echo '<div class="np-oh-main-column">';
 
     echo '<div class="postbox">';
-    echo '<h2 class="hndle">Order data</h2>';
+    echo '<h2 class="hndle">Ordredata</h2>';
     echo '<div class="inside">';
     echo '<form method="post">';
     wp_nonce_field('np_order_hub_update_addresses');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
     echo '<div class="order_data_column_container">';
     echo '<div class="order_data_column">';
-    echo '<h3>General</h3>';
-    echo '<div class="np-oh-readonly-list">';
-    echo '<p><strong>Order:</strong> ' . esc_html($order_label) . '</p>';
-    echo '<p><strong>Store:</strong> ' . esc_html($record['store_name']) . '</p>';
+    echo '<h3>Generelt</h3>';
+    echo '<div class="np-oh-readonly-list np-oh-summary-grid">';
+    echo '<p><strong>Ordre:</strong> ' . esc_html($order_label) . '</p>';
+    echo '<p><strong>Status:</strong> ' . esc_html($status_label) . '</p>';
+    echo '<p><strong>Kunde:</strong> ' . esc_html($customer_label) . '</p>';
+    echo '<p><strong>Butikk:</strong> ' . esc_html($record['store_name']) . '</p>';
     if ($date_label !== '') {
-        echo '<p><strong>Created:</strong> ' . esc_html($date_label) . '</p>';
+        echo '<p><strong>Dato opprettet:</strong> ' . esc_html($date_label) . '</p>';
     }
     if ($modified_label !== '') {
-        echo '<p><strong>Live synced:</strong> ' . esc_html($modified_label) . '</p>';
+        echo '<p><strong>Live synket:</strong> ' . esc_html($modified_label) . '</p>';
     }
-    echo '<p><strong>Total:</strong> ' . esc_html($total_display) . '</p>';
-    echo '<p><strong>Payment method:</strong> ' . esc_html($payment_method_title !== '' ? $payment_method_title : '—') . '</p>';
-    echo '<p><strong>Transaction ID:</strong> ' . esc_html($transaction_id !== '' ? $transaction_id : '—') . '</p>';
-    echo '<p><strong>Created via:</strong> ' . esc_html($created_via !== '' ? $created_via : '—') . '</p>';
+    echo '<p><strong>Totalt:</strong> ' . esc_html($total_display) . '</p>';
+    echo '<p><strong>Betalingsmetode:</strong> ' . esc_html($payment_method_title !== '' ? $payment_method_title : '—') . '</p>';
+    if ($transaction_id !== '') {
+        echo '<p><strong>Transaksjons-ID:</strong> ' . esc_html($transaction_id) . '</p>';
+    }
+    if ($customer_ip_address !== '') {
+        echo '<p><strong>Kunde-IP:</strong> ' . esc_html($customer_ip_address) . '</p>';
+    }
+    if ($created_via !== '') {
+        echo '<p><strong>Opprettet via:</strong> ' . esc_html($created_via) . '</p>';
+    }
     echo '</div>';
     echo '</div>';
     echo '<div class="order_data_column">';
-    echo '<h3>Billing</h3>';
+    echo '<h3>Fakturering</h3>';
     np_order_hub_render_order_editor_address_fields('billing', $live_billing, 'billing');
     echo '</div>';
     echo '<div class="order_data_column">';
-    echo '<h3>Shipping</h3>';
+    echo '<h3>Frakt</h3>';
     np_order_hub_render_order_editor_address_fields('shipping', $live_shipping, 'shipping');
     echo '</div>';
     echo '</div>';
-    echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_addresses" value="1">Save order data</button></p>';
+    echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_addresses" value="1">Lagre ordredata</button></p>';
     echo '</form>';
     echo '</div>';
     echo '</div>';
 
     echo '<div class="postbox">';
-    echo '<h2 class="hndle">Order items</h2>';
+    echo '<h2 class="hndle">Produktlinjer</h2>';
     echo '<div class="inside">';
-    echo '<p class="description">Hub follows the store order. Product rows can only be adjusted by quantity here.</p>';
+    echo '<p class="description">Hub følger butikkordren. Produktlinjer kan kun justeres med antall her.</p>';
     echo '<div class="np-oh-items-section">';
     if (empty($line_items)) {
-        echo '<p class="description">No line items found.</p>';
+        echo '<p class="description">Ingen varelinjer funnet.</p>';
     } else {
         echo '<form method="post">';
         wp_nonce_field('np_order_hub_update_line_items');
         echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
-        echo '<table class="widefat striped np-oh-items-table">';
-        echo '<thead><tr><th>Item</th><th class="column-cost np-oh-amount">Cost</th><th class="column-qty">Qty</th><th class="column-total np-oh-amount">Total</th></tr></thead><tbody>';
+        echo '<table class="widefat striped np-oh-items-table np-oh-woo-items-table">';
+        echo '<thead><tr><th>Produkt</th><th class="column-cost np-oh-amount">Pris</th><th class="column-qty">Antall</th><th class="column-total np-oh-amount">Totalt</th></tr></thead><tbody>';
         foreach ($line_items as $item) {
             if (!is_array($item)) {
                 continue;
@@ -1243,29 +1383,56 @@ function np_order_hub_order_details_page() {
             echo '<td>';
             np_order_hub_render_order_editor_item_summary($item);
             echo '</td>';
-            echo '<td class="np-oh-amount">' . esc_html(trim(number_format_i18n($unit_cost, 2) . ' ' . $currency)) . '</td>';
+            echo '<td class="np-oh-amount">' . esc_html(np_order_hub_format_money($unit_cost, $currency)) . '</td>';
             echo '<td><input class="np-oh-qty-input" type="number" min="1" name="line_items[' . esc_attr((string) $item_id) . '][quantity]" value="' . esc_attr((string) max(1, $qty)) . '" /></td>';
-            echo '<td class="np-oh-amount">' . esc_html(trim(number_format_i18n($total_value, 2) . ' ' . $currency)) . '</td>';
+            echo '<td class="np-oh-amount">' . esc_html(np_order_hub_format_money($total_value, $currency)) . '</td>';
             echo '</tr>';
         }
         echo '</tbody></table>';
-        echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_line_items" value="1">Save quantities</button></p>';
+        echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_line_items" value="1">Lagre antall</button></p>';
         echo '</form>';
     }
     echo '</div>';
 
+    if (!empty($shipping_lines)) {
+        echo '<div class="np-oh-charge-lines">';
+        foreach ($shipping_lines as $shipping_line) {
+            if (!is_array($shipping_line)) {
+                continue;
+            }
+            $shipping_total_value = np_order_hub_parse_numeric_value($shipping_line['total'] ?? null);
+            $shipping_meta_lines = np_order_hub_format_meta_lines($shipping_line['meta_data'] ?? array());
+            echo '<div class="np-oh-charge-line">';
+            echo '<div>';
+            echo '<span class="np-oh-charge-line-title">' . esc_html((string) ($shipping_line['method_title'] ?? 'Frakt')) . '</span>';
+            if (!empty($shipping_meta_lines)) {
+                foreach ($shipping_meta_lines as $meta_line) {
+                    echo '<span class="np-oh-charge-line-meta">' . esc_html($meta_line) . '</span>';
+                }
+            }
+            echo '</div>';
+            echo '<strong>' . esc_html(np_order_hub_format_money($shipping_total_value !== null ? $shipping_total_value : 0, $currency)) . '</strong>';
+            echo '</div>';
+        }
+        echo '</div>';
+    }
+
+    np_order_hub_render_order_editor_totals_summary($live_order, $currency);
+
+    echo '<details class="np-oh-advanced-edit">';
+    echo '<summary>Rediger frakt og gebyrer</summary>';
     echo '<div class="np-oh-items-section">';
     echo '<div class="np-oh-two-col">';
     echo '<div>';
-    echo '<h3>Shipping lines</h3>';
+    echo '<h3>Fraktlinjer</h3>';
     echo '<form method="post">';
     wp_nonce_field('np_order_hub_update_shipping');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
     if (empty($shipping_lines)) {
-        echo '<p class="description">No shipping lines on this order.</p>';
+        echo '<p class="description">Ingen fraktlinjer på denne ordren.</p>';
     } else {
         echo '<table class="widefat striped">';
-        echo '<thead><tr><th>Title</th><th>Total</th><th>Remove</th></tr></thead><tbody>';
+        echo '<thead><tr><th>Tittel</th><th>Totalt</th><th>Fjern</th></tr></thead><tbody>';
         foreach ($shipping_lines as $shipping_line) {
             if (!is_array($shipping_line)) {
                 continue;
@@ -1277,32 +1444,32 @@ function np_order_hub_order_details_page() {
             echo '<tr>';
             echo '<td><input type="text" name="shipping_lines[' . esc_attr((string) $shipping_id) . '][method_title]" value="' . esc_attr((string) ($shipping_line['method_title'] ?? '')) . '" class="regular-text" /></td>';
             echo '<td><input type="text" name="shipping_lines[' . esc_attr((string) $shipping_id) . '][total]" value="' . esc_attr((string) ($shipping_line['total'] ?? '0')) . '" style="width:110px;" /></td>';
-            echo '<td><label><input type="checkbox" name="shipping_lines[' . esc_attr((string) $shipping_id) . '][remove]" value="1" /> Remove</label></td>';
+            echo '<td><label><input type="checkbox" name="shipping_lines[' . esc_attr((string) $shipping_id) . '][remove]" value="1" /> Fjern</label></td>';
             echo '<input type="hidden" name="shipping_lines[' . esc_attr((string) $shipping_id) . '][method_id]" value="' . esc_attr((string) ($shipping_line['method_id'] ?? '')) . '" />';
             echo '</tr>';
         }
         echo '</tbody></table>';
     }
-    echo '<h4>Add shipping line</h4>';
+    echo '<h4>Legg til fraktlinje</h4>';
     echo '<div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">';
-    echo '<div><label><strong>Title</strong><br /><input type="text" name="new_shipping[method_title]" class="regular-text" value="' . esc_attr((string) $new_shipping_form['method_title']) . '" /></label></div>';
+    echo '<div><label><strong>Tittel</strong><br /><input type="text" name="new_shipping[method_title]" class="regular-text" value="' . esc_attr((string) $new_shipping_form['method_title']) . '" /></label></div>';
     echo '<div><label><strong>Method ID</strong><br /><input type="text" name="new_shipping[method_id]" value="' . esc_attr((string) $new_shipping_form['method_id']) . '" style="width:140px;" /></label></div>';
-    echo '<div><label><strong>Total</strong><br /><input type="text" name="new_shipping[total]" value="' . esc_attr((string) $new_shipping_form['total']) . '" style="width:110px;" /></label></div>';
+    echo '<div><label><strong>Totalt</strong><br /><input type="text" name="new_shipping[total]" value="' . esc_attr((string) $new_shipping_form['total']) . '" style="width:110px;" /></label></div>';
     echo '</div>';
-    echo '<p><button class="button" type="submit" name="np_order_hub_update_shipping" value="1">Save shipping</button></p>';
+    echo '<p><button class="button" type="submit" name="np_order_hub_update_shipping" value="1">Lagre frakt</button></p>';
     echo '</form>';
     echo '</div>';
 
     echo '<div>';
-    echo '<h3>Fees / discounts</h3>';
+    echo '<h3>Gebyrer / rabatter</h3>';
     echo '<form method="post">';
     wp_nonce_field('np_order_hub_update_fees');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
     if (empty($fee_lines)) {
-        echo '<p class="description">No fee lines on this order.</p>';
+        echo '<p class="description">Ingen gebyrlinjer på denne ordren.</p>';
     } else {
         echo '<table class="widefat striped">';
-        echo '<thead><tr><th>Name</th><th>Amount</th><th>Remove</th></tr></thead><tbody>';
+        echo '<thead><tr><th>Navn</th><th>Beløp</th><th>Fjern</th></tr></thead><tbody>';
         foreach ($fee_lines as $fee_line) {
             if (!is_array($fee_line)) {
                 continue;
@@ -1314,27 +1481,28 @@ function np_order_hub_order_details_page() {
             echo '<tr>';
             echo '<td><input type="text" name="fee_lines[' . esc_attr((string) $fee_id) . '][name]" class="regular-text" value="' . esc_attr((string) ($fee_line['name'] ?? '')) . '" /></td>';
             echo '<td><input type="text" name="fee_lines[' . esc_attr((string) $fee_id) . '][amount]" value="' . esc_attr((string) ($fee_line['total'] ?? '0')) . '" style="width:110px;" /></td>';
-            echo '<td><label><input type="checkbox" name="fee_lines[' . esc_attr((string) $fee_id) . '][remove]" value="1" /> Remove</label></td>';
+            echo '<td><label><input type="checkbox" name="fee_lines[' . esc_attr((string) $fee_id) . '][remove]" value="1" /> Fjern</label></td>';
             echo '</tr>';
         }
         echo '</tbody></table>';
     }
-    echo '<h4>Add fee / discount</h4>';
-    echo '<p class="description">Use a negative amount for a discount.</p>';
+    echo '<h4>Legg til gebyr / rabatt</h4>';
+    echo '<p class="description">Bruk negativt beløp for rabatt.</p>';
     echo '<div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">';
-    echo '<div><label><strong>Name</strong><br /><input type="text" name="new_fee[name]" class="regular-text" value="' . esc_attr((string) $new_fee_form['name']) . '" /></label></div>';
-    echo '<div><label><strong>Amount</strong><br /><input type="text" name="new_fee[amount]" value="' . esc_attr((string) $new_fee_form['amount']) . '" style="width:110px;" /></label></div>';
+    echo '<div><label><strong>Navn</strong><br /><input type="text" name="new_fee[name]" class="regular-text" value="' . esc_attr((string) $new_fee_form['name']) . '" /></label></div>';
+    echo '<div><label><strong>Beløp</strong><br /><input type="text" name="new_fee[amount]" value="' . esc_attr((string) $new_fee_form['amount']) . '" style="width:110px;" /></label></div>';
     echo '</div>';
-    echo '<p><button class="button" type="submit" name="np_order_hub_update_fees" value="1">Save fees / discounts</button></p>';
+    echo '<p><button class="button" type="submit" name="np_order_hub_update_fees" value="1">Lagre gebyrer / rabatter</button></p>';
     echo '</form>';
     echo '</div>';
     echo '</div>';
     echo '<form method="post" style="margin-top:12px;">';
     wp_nonce_field('np_order_hub_recalculate_order');
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
-    echo '<button class="button" type="submit" name="np_order_hub_recalculate_order" value="1">Recalculate totals</button>';
+    echo '<button class="button" type="submit" name="np_order_hub_recalculate_order" value="1">Beregn på nytt</button>';
     echo '</form>';
     echo '</div>';
+    echo '</details>';
     echo '</div>';
 
     $help_scout_settings = np_order_hub_get_help_scout_settings();
