@@ -893,6 +893,7 @@ function np_order_hub_backfill_processing_orders($store_filter = '', $max_per_st
                     if (!empty($existing_payload['np_bytte_storrelse_source_order']) && empty($data['np_bytte_storrelse_source_order'])) {
                         $data['np_bytte_storrelse_source_order'] = (int) $existing_payload['np_bytte_storrelse_source_order'];
                     }
+                    $data = np_order_hub_preserve_line_item_enrichment($data, $existing_payload);
                     $previous_status = '';
                     if (!empty($existing_payload['status'])) {
                         $previous_status = sanitize_key((string) $existing_payload['status']);

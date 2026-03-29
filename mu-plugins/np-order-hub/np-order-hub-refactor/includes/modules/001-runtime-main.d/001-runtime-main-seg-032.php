@@ -138,6 +138,98 @@ function np_order_hub_get_record_payload_data($record) {
     return is_array($payload) ? $payload : array();
 }
 
+function np_order_hub_get_line_item_enrichment_match_key($item) {
+    if (!is_array($item)) {
+        return '';
+    }
+
+    $product_id = absint($item['product_id'] ?? 0);
+    $variation_id = absint($item['variation_id'] ?? 0);
+    $sku = sanitize_text_field((string) ($item['sku'] ?? ''));
+    $name = sanitize_text_field((string) ($item['name'] ?? ''));
+
+    if ($product_id < 1 && $variation_id < 1 && $sku === '' && $name === '') {
+        return '';
+    }
+
+    return implode('|', array(
+        (string) $product_id,
+        (string) $variation_id,
+        $sku,
+        $name,
+    ));
+}
+
+function np_order_hub_line_item_has_image($item) {
+    return !empty($item['image'])
+        && is_array($item['image'])
+        && !empty($item['image']['src'])
+        && is_string($item['image']['src']);
+}
+
+function np_order_hub_preserve_line_item_enrichment($incoming_payload, $existing_payload) {
+    if (!is_array($incoming_payload) || empty($incoming_payload['line_items']) || !is_array($incoming_payload['line_items'])) {
+        return is_array($incoming_payload) ? $incoming_payload : array();
+    }
+    if (!is_array($existing_payload) || empty($existing_payload['line_items']) || !is_array($existing_payload['line_items'])) {
+        return $incoming_payload;
+    }
+
+    $existing_by_id = array();
+    $existing_by_key = array();
+
+    foreach ($existing_payload['line_items'] as $existing_item) {
+        if (!is_array($existing_item)) {
+            continue;
+        }
+
+        $existing_item_id = absint($existing_item['id'] ?? 0);
+        if ($existing_item_id > 0) {
+            $existing_by_id[$existing_item_id] = $existing_item;
+        }
+
+        $match_key = np_order_hub_get_line_item_enrichment_match_key($existing_item);
+        if ($match_key !== '' && empty($existing_by_key[$match_key])) {
+            $existing_by_key[$match_key] = $existing_item;
+        }
+    }
+
+    foreach ($incoming_payload['line_items'] as $index => $incoming_item) {
+        if (!is_array($incoming_item)) {
+            continue;
+        }
+
+        $matched_item = null;
+        $incoming_item_id = absint($incoming_item['id'] ?? 0);
+        if ($incoming_item_id > 0 && !empty($existing_by_id[$incoming_item_id])) {
+            $matched_item = $existing_by_id[$incoming_item_id];
+        } else {
+            $match_key = np_order_hub_get_line_item_enrichment_match_key($incoming_item);
+            if ($match_key !== '' && !empty($existing_by_key[$match_key])) {
+                $matched_item = $existing_by_key[$match_key];
+            }
+        }
+
+        if (!is_array($matched_item)) {
+            continue;
+        }
+
+        if (!np_order_hub_line_item_has_image($incoming_item) && np_order_hub_line_item_has_image($matched_item)) {
+            $incoming_item['image'] = $matched_item['image'];
+        }
+        if (empty($incoming_item['editor_options']) && !empty($matched_item['editor_options']) && is_array($matched_item['editor_options'])) {
+            $incoming_item['editor_options'] = $matched_item['editor_options'];
+        }
+        if (empty($incoming_item['parent_name']) && !empty($matched_item['parent_name'])) {
+            $incoming_item['parent_name'] = (string) $matched_item['parent_name'];
+        }
+
+        $incoming_payload['line_items'][$index] = $incoming_item;
+    }
+
+    return $incoming_payload;
+}
+
 function np_order_hub_upsert_record_from_remote_payload($record, $store, $data) {
     if (!is_array($store) || !is_array($data)) {
         return is_array($record) ? $record : null;
@@ -186,6 +278,8 @@ function np_order_hub_upsert_record_from_remote_payload($record, $store, $data) 
     if (!empty($existing_payload['np_bytte_storrelse_source_order']) && empty($data['np_bytte_storrelse_source_order'])) {
         $data['np_bytte_storrelse_source_order'] = (int) $existing_payload['np_bytte_storrelse_source_order'];
     }
+
+    $data = np_order_hub_preserve_line_item_enrichment($data, $existing_payload);
 
     $order_number = isset($data['number']) ? sanitize_text_field((string) $data['number']) : (string) $order_id;
     $status = isset($data['status']) ? sanitize_key((string) $data['status']) : (is_array($record) ? sanitize_key((string) ($record['status'] ?? '')) : '');

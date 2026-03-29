@@ -238,6 +238,7 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
     if (!empty($existing_payload['np_bytte_storrelse_source_order']) && empty($data['np_bytte_storrelse_source_order'])) {
         $data['np_bytte_storrelse_source_order'] = (int) $existing_payload['np_bytte_storrelse_source_order'];
     }
+    $data = np_order_hub_preserve_line_item_enrichment($data, $existing_payload);
     $is_reklamasjon_order = !empty($data['np_reklamasjon']) || !empty($data['np_reklamasjon_source_order']) || $status === 'reklamasjon';
     $is_bytte_storrelse_order = !empty($data['np_bytte_storrelse']) || !empty($data['np_bytte_storrelse_source_order']) || $status === 'bytte-storrelse';
     $is_special_order = $is_reklamasjon_order || $is_bytte_storrelse_order;
