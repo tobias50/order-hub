@@ -651,6 +651,10 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .np-oh-item-detail strong{font-weight:600;color:#50575e}
         .np-oh-editor-screen .np-oh-item-meta{margin:8px 0 0 0;padding:0;list-style:none}
         .np-oh-editor-screen .np-oh-item-meta li{margin:0 0 5px;color:#1d2327}
+        .np-oh-editor-screen .np-oh-item-editor{display:grid;gap:6px;max-width:360px;margin-top:12px}
+        .np-oh-editor-screen .np-oh-item-editor label{font-size:12px;font-weight:600;color:#50575e}
+        .np-oh-editor-screen .np-oh-item-editor-static{padding:8px 10px;background:#f6f7f7;border:1px solid #dcdcde;border-radius:4px}
+        .np-oh-editor-screen .np-oh-item-remove{margin-top:8px}
         .np-oh-editor-screen .np-oh-qty-input{width:76px}
         .np-oh-editor-screen .np-oh-amount{text-align:right;white-space:nowrap}
         .np-oh-editor-screen .np-oh-items-table td,
@@ -675,6 +679,11 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .np-oh-payment-note{margin:10px 0 0;color:#50575e;text-align:right}
         .np-oh-editor-screen .np-oh-advanced-edit{margin-top:18px;border-top:1px solid #dcdcde;padding-top:16px}
         .np-oh-editor-screen .np-oh-advanced-edit summary{cursor:pointer;font-weight:600}
+        .np-oh-editor-screen .np-oh-add-item-panel{margin-top:18px;padding-top:18px;border-top:1px solid #dcdcde}
+        .np-oh-editor-screen .np-oh-add-item-grid{display:grid;grid-template-columns:minmax(0,1fr) 110px auto;gap:12px;align-items:end}
+        .np-oh-editor-screen .np-oh-add-item-grid .button{margin-bottom:0}
+        .np-oh-editor-screen .np-oh-search-results{margin-top:12px}
+        .np-oh-editor-screen .np-oh-search-results select{max-width:none}
         .np-oh-editor-screen .np-oh-sidebar-form + .np-oh-sidebar-form{margin-top:14px;padding-top:14px;border-top:1px solid #eee}
         .np-oh-editor-screen .np-oh-sidebar-actions .button{margin:0 8px 8px 0}
         .np-oh-editor-screen .np-oh-sidebar-actions select,
@@ -719,6 +728,7 @@ function np_order_hub_render_order_editor_styles() {
         }
         @media (max-width: 860px){
             .np-oh-editor-screen .np-oh-two-col{grid-template-columns:1fr}
+            .np-oh-editor-screen .np-oh-add-item-grid{grid-template-columns:1fr}
         }
     </style>';
 }
@@ -845,6 +855,106 @@ function np_order_hub_render_order_editor_item_summary($item) {
     echo '</div>';
 }
 
+function np_order_hub_encode_order_editor_option_value($product_id, $variation_id) {
+    return absint($product_id) . ':' . absint($variation_id);
+}
+
+function np_order_hub_decode_order_editor_option_value($value) {
+    $value = trim((string) $value);
+    if ($value === '') {
+        return array('product_id' => 0, 'variation_id' => 0);
+    }
+
+    $parts = array_map('trim', explode(':', $value, 2));
+    return array(
+        'product_id' => isset($parts[0]) ? absint($parts[0]) : 0,
+        'variation_id' => isset($parts[1]) ? absint($parts[1]) : 0,
+    );
+}
+
+function np_order_hub_get_order_editor_item_options($item) {
+    $options = array();
+    $raw_options = isset($item['editor_options']) && is_array($item['editor_options']) ? $item['editor_options'] : array();
+    foreach ($raw_options as $option) {
+        if (!is_array($option)) {
+            continue;
+        }
+        $product_id = absint($option['product_id'] ?? 0);
+        $variation_id = absint($option['variation_id'] ?? 0);
+        $label = trim((string) ($option['label'] ?? ''));
+        if ($product_id < 1 || $label === '') {
+            continue;
+        }
+        $options[] = array(
+            'product_id' => $product_id,
+            'variation_id' => $variation_id,
+            'label' => $label,
+        );
+    }
+
+    if (empty($options)) {
+        $product_id = absint($item['product_id'] ?? 0);
+        $variation_id = absint($item['variation_id'] ?? 0);
+        if ($product_id > 0) {
+            $options[] = array(
+                'product_id' => $product_id,
+                'variation_id' => $variation_id,
+                'label' => trim((string) ($item['name'] ?? 'Varelinje')),
+            );
+        }
+    }
+
+    return $options;
+}
+
+function np_order_hub_render_order_editor_item_selector($item, $item_id) {
+    $item = is_array($item) ? $item : array();
+    $item_id = absint($item_id);
+    if ($item_id < 1) {
+        return;
+    }
+
+    $options = np_order_hub_get_order_editor_item_options($item);
+    if (empty($options)) {
+        return;
+    }
+
+    $current_value = np_order_hub_encode_order_editor_option_value(
+        absint($item['product_id'] ?? 0),
+        absint($item['variation_id'] ?? 0)
+    );
+
+    echo '<div class="np-oh-item-editor">';
+    echo '<label for="np-oh-item-selection-' . esc_attr((string) $item_id) . '">Variant / størrelse</label>';
+    if (count($options) === 1) {
+        echo '<div class="np-oh-item-editor-static">' . esc_html((string) $options[0]['label']) . '</div>';
+        echo '<input type="hidden" name="line_items[' . esc_attr((string) $item_id) . '][editor_selection]" value="' . esc_attr(np_order_hub_encode_order_editor_option_value($options[0]['product_id'], $options[0]['variation_id'])) . '" />';
+    } else {
+        echo '<select id="np-oh-item-selection-' . esc_attr((string) $item_id) . '" name="line_items[' . esc_attr((string) $item_id) . '][editor_selection]">';
+        foreach ($options as $option) {
+            $value = np_order_hub_encode_order_editor_option_value($option['product_id'], $option['variation_id']);
+            echo '<option value="' . esc_attr($value) . '"' . selected($current_value, $value, false) . '>' . esc_html((string) $option['label']) . '</option>';
+        }
+        echo '</select>';
+    }
+    echo '<label class="np-oh-item-remove"><input type="checkbox" name="line_items[' . esc_attr((string) $item_id) . '][remove]" value="1" /> Fjern varelinje</label>';
+    echo '</div>';
+}
+
+function np_order_hub_format_order_editor_search_result_label($result, $currency) {
+    $result = is_array($result) ? $result : array();
+    $label = trim((string) ($result['label'] ?? 'Produkt'));
+    $price_value = np_order_hub_parse_numeric_value($result['price'] ?? null);
+    if ($price_value !== null) {
+        $label .= ' — ' . np_order_hub_format_money($price_value, $currency);
+    }
+    $stock_status = trim((string) ($result['stock_status'] ?? ''));
+    if ($stock_status !== '') {
+        $label .= ' [' . $stock_status . ']';
+    }
+    return $label;
+}
+
 function np_order_hub_order_details_page() {
     if (!current_user_can('manage_options')) {
         return;
@@ -901,6 +1011,12 @@ function np_order_hub_order_details_page() {
     $new_fee_form = array(
         'name' => '',
         'amount' => '',
+    );
+    $item_search_query = '';
+    $item_search_results = array();
+    $new_item_form = array(
+        'selection' => '',
+        'quantity' => '1',
     );
 
     $help_scout_notice = null;
@@ -1055,6 +1171,66 @@ function np_order_hub_order_details_page() {
         }
     }
 
+    if ($record && !empty($_POST['np_order_hub_search_line_items'])) {
+        check_admin_referer('np_order_hub_search_line_items');
+        $item_search_query = sanitize_text_field((string) ($_POST['item_search_query'] ?? ''));
+        $new_item_form['selection'] = sanitize_text_field((string) ($_POST['new_item']['selection'] ?? ''));
+        $new_item_form['quantity'] = (string) max(1, absint($_POST['new_item']['quantity'] ?? 1));
+        if ($item_search_query === '' || strlen($item_search_query) < 2) {
+            $live_order_notice = array('type' => 'error', 'message' => 'Skriv minst to tegn for å søke etter produkter.');
+        } else {
+            $result = np_order_hub_search_remote_order_products($store, $item_search_query, 25);
+            if (is_wp_error($result)) {
+                $live_order_notice = array('type' => 'error', 'message' => $result->get_error_message());
+            } else {
+                $item_search_results = isset($result['results']) && is_array($result['results']) ? $result['results'] : array();
+                if (empty($item_search_results)) {
+                    $live_order_notice = array('type' => 'error', 'message' => 'Fant ingen produkter for søket.');
+                }
+            }
+        }
+    }
+
+    if ($record && !empty($_POST['np_order_hub_add_line_item'])) {
+        check_admin_referer('np_order_hub_search_line_items');
+        $item_search_query = sanitize_text_field((string) ($_POST['item_search_query'] ?? ''));
+        $new_item_form['selection'] = sanitize_text_field((string) ($_POST['new_item']['selection'] ?? ''));
+        $new_item_form['quantity'] = (string) max(1, absint($_POST['new_item']['quantity'] ?? 1));
+        $selection = np_order_hub_decode_order_editor_option_value($new_item_form['selection']);
+        if (($selection['product_id'] ?? 0) < 1) {
+            $live_order_notice = array('type' => 'error', 'message' => 'Velg et produkt som skal legges til.');
+        } else {
+            $result = np_order_hub_update_remote_order_items(
+                $store,
+                (int) $record['order_id'],
+                array(),
+                array(
+                    array(
+                        'product_id' => (int) $selection['product_id'],
+                        'variation_id' => (int) ($selection['variation_id'] ?? 0),
+                        'quantity' => max(1, absint($new_item_form['quantity'])),
+                    ),
+                )
+            );
+            if (is_wp_error($result)) {
+                $live_order_notice = array('type' => 'error', 'message' => $result->get_error_message());
+            } elseif (is_array($result) && !empty($result['order']) && is_array($result['order'])) {
+                $record = np_order_hub_upsert_record_from_remote_payload($record, $store, $result['order']);
+                $live_order_notice = array('type' => 'success', 'message' => 'Produkt lagt til på ordren.');
+                $item_search_query = '';
+                $item_search_results = array();
+                $new_item_form = array('selection' => '', 'quantity' => '1');
+            }
+        }
+
+        if ($item_search_query !== '' && empty($item_search_results)) {
+            $search_result = np_order_hub_search_remote_order_products($store, $item_search_query, 25);
+            if (!is_wp_error($search_result)) {
+                $item_search_results = isset($search_result['results']) && is_array($search_result['results']) ? $search_result['results'] : array();
+            }
+        }
+    }
+
     if ($record && !empty($_POST['np_order_hub_update_line_items'])) {
         check_admin_referer('np_order_hub_update_line_items');
         $posted_items = isset($_POST['line_items']) && is_array($_POST['line_items']) ? $_POST['line_items'] : array();
@@ -1063,9 +1239,13 @@ function np_order_hub_order_details_page() {
             if (!is_array($item_row)) {
                 continue;
             }
+            $selection = np_order_hub_decode_order_editor_option_value($item_row['editor_selection'] ?? '');
             $items_payload[] = array(
                 'item_id' => absint($item_id),
                 'quantity' => absint($item_row['quantity'] ?? 0),
+                'product_id' => (int) ($selection['product_id'] ?? 0),
+                'variation_id' => (int) ($selection['variation_id'] ?? 0),
+                'remove' => !empty($item_row['remove']) ? 1 : 0,
             );
         }
         $result = np_order_hub_update_remote_order_items($store, (int) $record['order_id'], $items_payload);
@@ -1073,7 +1253,7 @@ function np_order_hub_order_details_page() {
             $live_order_notice = array('type' => 'error', 'message' => $result->get_error_message());
         } elseif (is_array($result) && !empty($result['order']) && is_array($result['order'])) {
             $record = np_order_hub_upsert_record_from_remote_payload($record, $store, $result['order']);
-            $live_order_notice = array('type' => 'success', 'message' => 'Line items updated.');
+            $live_order_notice = array('type' => 'success', 'message' => 'Varelinjer oppdatert.');
         }
     }
 
@@ -1593,7 +1773,7 @@ function np_order_hub_order_details_page() {
     echo '<div class="postbox">';
     echo '<h2 class="hndle">Produktlinjer</h2>';
     echo '<div class="inside">';
-    echo '<p class="description">Hub følger butikkordren. Produktlinjer kan kun justeres med antall her.</p>';
+    echo '<p class="description">Du kan endre variant / størrelse, justere antall, fjerne varelinjer og legge til nye produkter direkte fra huben.</p>';
     echo '<div class="np-oh-items-section">';
     if (empty($line_items)) {
         echo '<p class="description">Ingen varelinjer funnet.</p>';
@@ -1618,6 +1798,7 @@ function np_order_hub_order_details_page() {
             echo '<tr>';
             echo '<td>';
             np_order_hub_render_order_editor_item_summary($item);
+            np_order_hub_render_order_editor_item_selector($item, $item_id);
             echo '</td>';
             echo '<td class="np-oh-amount">' . esc_html(np_order_hub_format_money($unit_cost, $currency)) . '</td>';
             echo '<td><input class="np-oh-qty-input" type="number" min="1" name="line_items[' . esc_attr((string) $item_id) . '][quantity]" value="' . esc_attr((string) max(1, $qty)) . '" /></td>';
@@ -1625,9 +1806,44 @@ function np_order_hub_order_details_page() {
             echo '</tr>';
         }
         echo '</tbody></table>';
-        echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_line_items" value="1">Lagre antall</button></p>';
+        echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_line_items" value="1">Lagre varelinjer</button></p>';
         echo '</form>';
     }
+    echo '</div>';
+    echo '<div class="np-oh-add-item-panel">';
+    echo '<h3>Legg til produkt</h3>';
+    echo '<form method="post">';
+    wp_nonce_field('np_order_hub_search_line_items');
+    echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
+    echo '<div class="np-oh-add-item-grid">';
+    echo '<div><label class="np-oh-field"><span class="np-oh-field-label">Søk etter produkt eller variant</span><input type="text" name="item_search_query" class="regular-text" value="' . esc_attr($item_search_query) . '" /></label></div>';
+    echo '<div><label class="np-oh-field"><span class="np-oh-field-label">Antall</span><input type="number" min="1" name="new_item[quantity]" value="' . esc_attr((string) $new_item_form['quantity']) . '" /></label></div>';
+    echo '<div><button class="button" type="submit" name="np_order_hub_search_line_items" value="1">Søk</button></div>';
+    echo '</div>';
+    if (!empty($item_search_results)) {
+        echo '<div class="np-oh-search-results">';
+        echo '<label class="np-oh-field" for="np-oh-new-item-selection"><span class="np-oh-field-label">Søkeresultater</span>';
+        echo '<select id="np-oh-new-item-selection" name="new_item[selection]">';
+        echo '<option value="">Velg produkt…</option>';
+        foreach ($item_search_results as $result_row) {
+            if (!is_array($result_row)) {
+                continue;
+            }
+            $option_value = np_order_hub_encode_order_editor_option_value(
+                absint($result_row['product_id'] ?? 0),
+                absint($result_row['variation_id'] ?? 0)
+            );
+            if ($option_value === '0:0') {
+                continue;
+            }
+            $label = np_order_hub_format_order_editor_search_result_label($result_row, $currency);
+            echo '<option value="' . esc_attr($option_value) . '"' . selected($new_item_form['selection'], $option_value, false) . '>' . esc_html($label) . '</option>';
+        }
+        echo '</select></label>';
+        echo '<p><button class="button button-primary" type="submit" formaction="' . esc_url(admin_url('admin.php?page=np-order-hub-details&record_id=' . (int) $record['id'])) . '" formmethod="post" name="np_order_hub_add_line_item" value="1">Legg til produkt</button></p>';
+        echo '</div>';
+    }
+    echo '</form>';
     echo '</div>';
 
     if (!empty($shipping_lines)) {

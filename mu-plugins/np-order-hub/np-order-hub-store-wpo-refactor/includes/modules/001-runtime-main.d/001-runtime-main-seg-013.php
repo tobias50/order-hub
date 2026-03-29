@@ -165,6 +165,9 @@ function np_order_hub_wpo_get_live_order_payload($order) {
     if (!is_array($payload)) {
         $payload = array();
     }
+    if (isset($payload['line_items']) && is_array($payload['line_items'])) {
+        $payload['line_items'] = np_order_hub_wpo_enrich_line_items_for_hub($payload['line_items']);
+    }
 
     $payload['billing'] = is_array($order->get_address('billing')) ? $order->get_address('billing') : array();
     $payload['shipping'] = is_array($order->get_address('shipping')) ? $order->get_address('shipping') : array();

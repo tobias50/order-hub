@@ -1,5 +1,5 @@
 <?php
-function np_order_hub_update_remote_order_items($store, $order_id, $items) {
+function np_order_hub_update_remote_order_items($store, $order_id, $items, $new_items = array()) {
     $order_id = absint($order_id);
     if ($order_id < 1) {
         return new WP_Error('missing_order_id', 'Missing order ID.');
@@ -7,6 +7,26 @@ function np_order_hub_update_remote_order_items($store, $order_id, $items) {
     return np_order_hub_request_remote_order_endpoint($store, 'order-items', 'POST', array(
         'order_id' => $order_id,
         'items' => is_array($items) ? $items : array(),
+        'new_items' => is_array($new_items) ? $new_items : array(),
+    ));
+}
+
+function np_order_hub_search_remote_order_products($store, $query, $limit = 20) {
+    $query = sanitize_text_field((string) $query);
+    if ($query === '') {
+        return array('status' => 'ok', 'results' => array());
+    }
+
+    $limit = absint($limit);
+    if ($limit < 1) {
+        $limit = 20;
+    } elseif ($limit > 50) {
+        $limit = 50;
+    }
+
+    return np_order_hub_request_remote_order_endpoint($store, 'order-item-search', 'GET', array(
+        'q' => $query,
+        'limit' => $limit,
     ));
 }
 

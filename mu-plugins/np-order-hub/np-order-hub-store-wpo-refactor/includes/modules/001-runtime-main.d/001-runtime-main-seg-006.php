@@ -240,6 +240,11 @@ function np_order_hub_wpo_register_routes() {
         'callback' => 'np_order_hub_wpo_update_order_items',
         'permission_callback' => '__return_true',
     ));
+    register_rest_route('np-order-hub/v1', '/order-item-search', array(
+        'methods' => 'GET',
+        'callback' => 'np_order_hub_wpo_search_order_products',
+        'permission_callback' => '__return_true',
+    ));
     register_rest_route('np-order-hub/v1', '/order-shipping', array(
         'methods' => 'POST',
         'callback' => 'np_order_hub_wpo_update_order_shipping',

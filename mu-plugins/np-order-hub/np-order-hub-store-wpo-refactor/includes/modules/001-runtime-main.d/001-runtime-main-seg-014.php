@@ -165,6 +165,235 @@ function np_order_hub_wpo_build_product_result_label($product) {
     return $label;
 }
 
+function np_order_hub_wpo_normalize_order_item_meta_key($key) {
+    $key = strtolower(trim(wp_strip_all_tags((string) $key)));
+    $key = str_replace(array('-', ':', '  '), array('_', '', ' '), $key);
+    $key = preg_replace('/\s+/', '_', $key);
+    return is_string($key) ? $key : '';
+}
+
+function np_order_hub_wpo_get_variation_meta_skip_keys($product) {
+    $skip = array(
+        '_product_id',
+        '_variation_id',
+        '_qty',
+        '_tax_class',
+        '_line_subtotal',
+        '_line_subtotal_tax',
+        '_line_total',
+        '_line_tax',
+        '_line_tax_data',
+    );
+
+    if (!$product || !is_object($product) || !method_exists($product, 'get_variation_attributes')) {
+        return array_fill_keys(array_map('np_order_hub_wpo_normalize_order_item_meta_key', $skip), true);
+    }
+
+    foreach ((array) $product->get_variation_attributes() as $attr_key => $attr_value) {
+        $taxonomy = str_replace('attribute_', '', (string) $attr_key);
+        $skip[] = (string) $attr_key;
+        $skip[] = $taxonomy;
+        $skip[] = str_replace('pa_', '', $taxonomy);
+        if (function_exists('wc_attribute_label')) {
+            $skip[] = (string) wc_attribute_label($taxonomy);
+        }
+    }
+
+    return array_fill_keys(array_map('np_order_hub_wpo_normalize_order_item_meta_key', $skip), true);
+}
+
+function np_order_hub_wpo_copy_editable_order_item_meta($source_item, $new_item, $target_product = null) {
+    if (!$source_item || !$new_item || !method_exists($source_item, 'get_meta_data') || !method_exists($new_item, 'add_meta_data')) {
+        return;
+    }
+
+    $skip_keys = array_merge(
+        np_order_hub_wpo_get_variation_meta_skip_keys(method_exists($source_item, 'get_product') ? $source_item->get_product() : null),
+        np_order_hub_wpo_get_variation_meta_skip_keys($target_product)
+    );
+
+    foreach ((array) $source_item->get_meta_data() as $meta) {
+        if (!is_object($meta) || !method_exists($meta, 'get_data')) {
+            continue;
+        }
+        $data = $meta->get_data();
+        $key = isset($data['key']) ? (string) $data['key'] : '';
+        if ($key === '') {
+            continue;
+        }
+
+        $normalized = np_order_hub_wpo_normalize_order_item_meta_key($key);
+        if ($normalized !== '' && isset($skip_keys[$normalized])) {
+            continue;
+        }
+
+        $new_item->add_meta_data($key, $data['value'], true);
+    }
+}
+
+function np_order_hub_wpo_apply_variation_attributes_to_item($new_item, $product) {
+    if (!$new_item || !$product || !is_object($product) || !$product->is_type('variation')) {
+        return;
+    }
+
+    $attributes = method_exists($product, 'get_variation_attributes') ? (array) $product->get_variation_attributes() : array();
+    if (method_exists($new_item, 'set_variation')) {
+        $new_item->set_variation($attributes);
+    }
+}
+
+function np_order_hub_wpo_prepare_order_item_product_target($product_id, $variation_id) {
+    $product_id = absint($product_id);
+    $variation_id = absint($variation_id);
+    $target_id = $variation_id > 0 ? $variation_id : $product_id;
+    if ($target_id < 1) {
+        return new WP_Error('missing_product', 'Missing product.');
+    }
+
+    $product = wc_get_product($target_id);
+    if (!$product || !$product->exists()) {
+        return new WP_Error('product_not_found', 'Product not found.');
+    }
+
+    if ($product->is_type('variable') && $variation_id < 1) {
+        return new WP_Error('missing_variation', 'Select a specific variation for variable products.');
+    }
+
+    if ($product->is_type('variation')) {
+        $variation_id = (int) $product->get_id();
+        $product_id = (int) $product->get_parent_id();
+    } else {
+        $variation_id = 0;
+        $product_id = (int) $product->get_id();
+    }
+
+    return array(
+        'product' => $product,
+        'product_id' => $product_id,
+        'variation_id' => $variation_id,
+    );
+}
+
+function np_order_hub_wpo_build_replacement_order_item($source_item, $product_id, $variation_id, $quantity) {
+    if (!class_exists('WC_Order_Item_Product')) {
+        return new WP_Error('woocommerce_item_missing', 'WooCommerce item classes missing.');
+    }
+
+    $target = np_order_hub_wpo_prepare_order_item_product_target($product_id, $variation_id);
+    if (is_wp_error($target)) {
+        return $target;
+    }
+
+    $product = $target['product'];
+    $product_id = (int) $target['product_id'];
+    $variation_id = (int) $target['variation_id'];
+    $quantity = max(1, absint($quantity));
+    $precision = function_exists('wc_get_price_decimals') ? wc_get_price_decimals() : 2;
+    $unit_price = np_order_hub_wpo_parse_decimal_input(method_exists($product, 'get_price') ? $product->get_price() : null, 0.0);
+
+    $new_item = new WC_Order_Item_Product();
+    if (method_exists($new_item, 'set_product')) {
+        $new_item->set_product($product);
+    }
+    if (method_exists($new_item, 'set_product_id')) {
+        $new_item->set_product_id($product_id);
+    }
+    if ($variation_id > 0 && method_exists($new_item, 'set_variation_id')) {
+        $new_item->set_variation_id($variation_id);
+    }
+
+    $name_product = $product_id > 0 ? wc_get_product($product_id) : null;
+    $item_name = $name_product && method_exists($name_product, 'get_name') ? (string) $name_product->get_name() : (method_exists($product, 'get_name') ? (string) $product->get_name() : 'Product');
+    $new_item->set_name($item_name);
+    $new_item->set_quantity($quantity);
+    if (method_exists($product, 'get_tax_class') && method_exists($new_item, 'set_tax_class')) {
+        $new_item->set_tax_class((string) $product->get_tax_class());
+    }
+    $new_item->set_subtotal(round((float) $unit_price * $quantity, $precision));
+    $new_item->set_total(round((float) $unit_price * $quantity, $precision));
+
+    if ($source_item) {
+        np_order_hub_wpo_copy_editable_order_item_meta($source_item, $new_item, $product);
+    }
+    np_order_hub_wpo_apply_variation_attributes_to_item($new_item, $product);
+
+    return $new_item;
+}
+
+function np_order_hub_wpo_get_product_editor_options($product_id, $variation_id = 0) {
+    $product_id = absint($product_id);
+    $variation_id = absint($variation_id);
+    $cache_key = $product_id . ':' . $variation_id;
+    static $cache = array();
+
+    if (isset($cache[$cache_key])) {
+        return $cache[$cache_key];
+    }
+
+    $options = array();
+    $base_product = $variation_id > 0 ? wc_get_product($variation_id) : wc_get_product($product_id);
+    if (!$base_product || !$base_product->exists()) {
+        $cache[$cache_key] = $options;
+        return $options;
+    }
+
+    if ($base_product->is_type('variation')) {
+        $parent_id = (int) $base_product->get_parent_id();
+        $parent = $parent_id > 0 ? wc_get_product($parent_id) : null;
+        $children = $parent && method_exists($parent, 'get_children') ? (array) $parent->get_children() : array();
+        foreach ($children as $child_id) {
+            $variation = wc_get_product($child_id);
+            if (!$variation || !$variation->exists()) {
+                continue;
+            }
+            $options[] = array(
+                'product_id' => $parent_id,
+                'variation_id' => (int) $variation->get_id(),
+                'label' => np_order_hub_wpo_build_product_result_label($variation),
+            );
+        }
+    } elseif ($base_product->is_type('variable') && method_exists($base_product, 'get_children')) {
+        foreach ((array) $base_product->get_children() as $child_id) {
+            $variation = wc_get_product($child_id);
+            if (!$variation || !$variation->exists()) {
+                continue;
+            }
+            $options[] = array(
+                'product_id' => (int) $base_product->get_id(),
+                'variation_id' => (int) $variation->get_id(),
+                'label' => np_order_hub_wpo_build_product_result_label($variation),
+            );
+        }
+    } else {
+        $options[] = array(
+            'product_id' => (int) $base_product->get_id(),
+            'variation_id' => 0,
+            'label' => np_order_hub_wpo_build_product_result_label($base_product),
+        );
+    }
+
+    $cache[$cache_key] = $options;
+    return $options;
+}
+
+function np_order_hub_wpo_enrich_line_items_for_hub($line_items) {
+    if (!is_array($line_items)) {
+        return array();
+    }
+
+    foreach ($line_items as $index => $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        $product_id = isset($item['product_id']) ? (int) $item['product_id'] : 0;
+        $variation_id = isset($item['variation_id']) ? (int) $item['variation_id'] : 0;
+        $item['editor_options'] = np_order_hub_wpo_get_product_editor_options($product_id, $variation_id);
+        $line_items[$index] = $item;
+    }
+
+    return $line_items;
+}
+
 function np_order_hub_wpo_search_order_products(WP_REST_Request $request) {
     if (!np_order_hub_wpo_is_request_authorized($request)) {
         return new WP_REST_Response(array('error' => 'Unauthorized.'), 401);
@@ -259,7 +488,8 @@ function np_order_hub_wpo_update_order_items(WP_REST_Request $request) {
 
     $params = np_order_hub_wpo_get_request_params($request);
     $items = isset($params['items']) && is_array($params['items']) ? $params['items'] : array();
-    if (empty($items)) {
+    $new_items = isset($params['new_items']) && is_array($params['new_items']) ? $params['new_items'] : array();
+    if (empty($items) && empty($new_items)) {
         return new WP_REST_Response(array('error' => 'Missing items.'), 400);
     }
 
@@ -270,18 +500,45 @@ function np_order_hub_wpo_update_order_items(WP_REST_Request $request) {
         if (!is_array($item_row)) {
             continue;
         }
+
         $item_id = isset($item_row['item_id']) ? absint($item_row['item_id']) : 0;
         if ($item_id < 1) {
             continue;
         }
+
         $order_item = $order->get_item($item_id);
         if (!$order_item || !is_a($order_item, 'WC_Order_Item_Product')) {
             return new WP_REST_Response(array('error' => 'Order item not found.'), 404);
         }
 
+        if (!empty($item_row['remove'])) {
+            $order->remove_item($item_id);
+            continue;
+        }
+
         $quantity = isset($item_row['quantity']) ? absint($item_row['quantity']) : (int) $order_item->get_quantity();
         if ($quantity < 1) {
             $quantity = 1;
+        }
+
+        $current_product_id = method_exists($order_item, 'get_product_id') ? (int) $order_item->get_product_id() : 0;
+        $current_variation_id = method_exists($order_item, 'get_variation_id') ? (int) $order_item->get_variation_id() : 0;
+        $target_product_id = isset($item_row['product_id']) ? absint($item_row['product_id']) : $current_product_id;
+        $target_variation_id = isset($item_row['variation_id']) ? absint($item_row['variation_id']) : $current_variation_id;
+
+        $replace_item = $target_product_id > 0 && (
+            $target_product_id !== $current_product_id ||
+            $target_variation_id !== $current_variation_id
+        );
+
+        if ($replace_item) {
+            $new_item = np_order_hub_wpo_build_replacement_order_item($order_item, $target_product_id, $target_variation_id, $quantity);
+            if (is_wp_error($new_item)) {
+                return new WP_REST_Response(array('error' => $new_item->get_error_message()), 400);
+            }
+            $order->remove_item($item_id);
+            $order->add_item($new_item);
+            continue;
         }
 
         $current_qty = max(1, (int) $order_item->get_quantity());
@@ -304,6 +561,26 @@ function np_order_hub_wpo_update_order_items(WP_REST_Request $request) {
             $order_item->set_taxes(np_order_hub_wpo_scale_taxes($current_taxes, $ratio, $precision));
         }
         $order_item->save();
+    }
+
+    foreach ($new_items as $item_row) {
+        if (!is_array($item_row)) {
+            continue;
+        }
+
+        $product_id = isset($item_row['product_id']) ? absint($item_row['product_id']) : 0;
+        $variation_id = isset($item_row['variation_id']) ? absint($item_row['variation_id']) : 0;
+        $quantity = isset($item_row['quantity']) ? absint($item_row['quantity']) : 1;
+        if ($quantity < 1) {
+            $quantity = 1;
+        }
+
+        $new_item = np_order_hub_wpo_build_replacement_order_item(null, $product_id, $variation_id, $quantity);
+        if (is_wp_error($new_item)) {
+            return new WP_REST_Response(array('error' => $new_item->get_error_message()), 400);
+        }
+
+        $order->add_item($new_item);
     }
 
     $order->calculate_totals(false);
@@ -348,39 +625,9 @@ function np_order_hub_wpo_add_order_item(WP_REST_Request $request) {
     }
 
     $before_stock = np_order_hub_wpo_collect_order_stock_map($order);
-    $precision = function_exists('wc_get_price_decimals') ? wc_get_price_decimals() : 2;
-    if ($unit_price === null) {
-        $unit_price = (float) $product->get_price();
-    }
-
-    $new_item = new WC_Order_Item_Product();
-    $new_item->set_product($product);
-    $new_item->set_quantity($quantity);
-    $new_item->set_subtotal(round($unit_price * $quantity, $precision));
-    $new_item->set_total(round($unit_price * $quantity, $precision));
-    if ($variation_id > 0) {
-        $new_item->set_variation_id($variation_id);
-        if (method_exists($product, 'get_variation_attributes')) {
-            $attributes = (array) $product->get_variation_attributes();
-            if (method_exists($new_item, 'set_variation')) {
-                $new_item->set_variation($attributes);
-            }
-            foreach ($attributes as $attr_key => $attr_value) {
-                if ($attr_value === '') {
-                    continue;
-                }
-                $taxonomy = str_replace('attribute_', '', (string) $attr_key);
-                $display_key = function_exists('wc_attribute_label') ? wc_attribute_label($taxonomy) : $taxonomy;
-                $display_value = (string) $attr_value;
-                if (taxonomy_exists($taxonomy)) {
-                    $term = get_term_by('slug', (string) $attr_value, $taxonomy);
-                    if ($term && !is_wp_error($term)) {
-                        $display_value = $term->name;
-                    }
-                }
-                $new_item->add_meta_data($display_key, $display_value, true);
-            }
-        }
+    $new_item = np_order_hub_wpo_build_replacement_order_item(null, $product_id, $variation_id, $quantity);
+    if (is_wp_error($new_item)) {
+        return new WP_REST_Response(array('error' => $new_item->get_error_message()), 400);
     }
 
     $order->add_item($new_item);
