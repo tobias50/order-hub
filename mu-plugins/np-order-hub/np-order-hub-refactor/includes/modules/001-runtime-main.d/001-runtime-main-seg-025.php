@@ -644,33 +644,41 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .np-oh-summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px}
         .np-oh-editor-screen .np-oh-summary-grid p{margin:0}
         .np-oh-editor-screen .np-oh-two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
-        .np-oh-editor-screen .np-oh-item-summary{display:flex;gap:12px;align-items:flex-start}
-        .np-oh-editor-screen .np-oh-item-thumb img{display:block;width:60px;height:60px;object-fit:cover;border:1px solid #ccd0d4;border-radius:2px;background:#fff}
-        .np-oh-editor-screen .np-oh-item-title{display:block;margin-bottom:6px;font-size:16px;line-height:1.35;color:#2271b1}
+        .np-oh-editor-screen .np-oh-item-thumb-cell{display:flex;align-items:flex-start;justify-content:center}
+        .np-oh-editor-screen .np-oh-item-thumb{display:flex;align-items:center;justify-content:center;width:48px;height:48px;border:1px solid #ccd0d4;border-radius:2px;background:#fff;color:#646970}
+        .np-oh-editor-screen .np-oh-item-thumb img{display:block;width:48px;height:48px;object-fit:cover;background:#fff}
+        .np-oh-editor-screen .np-oh-item-thumb.is-shipping{border-radius:50%;background:#f6f7f7}
+        .np-oh-editor-screen .np-oh-item-copy{min-width:0}
+        .np-oh-editor-screen .np-oh-item-title{display:block;margin-bottom:6px;font-size:14px;line-height:1.35;color:#2271b1;font-weight:600}
         .np-oh-editor-screen .np-oh-item-detail{margin:0 0 6px;color:#1d2327}
         .np-oh-editor-screen .np-oh-item-detail strong{font-weight:600;color:#50575e}
-        .np-oh-editor-screen .np-oh-item-meta{margin:8px 0 0 0;padding:0;list-style:none}
-        .np-oh-editor-screen .np-oh-item-meta li{margin:0 0 5px;color:#1d2327}
-        .np-oh-editor-screen .np-oh-item-editor{display:grid;gap:6px;max-width:360px;margin-top:12px}
+        .np-oh-editor-screen .np-oh-item-meta-table{margin-top:8px;border-collapse:collapse}
+        .np-oh-editor-screen .np-oh-item-meta-table th,
+        .np-oh-editor-screen .np-oh-item-meta-table td{padding:2px 0;border:none;text-align:left;vertical-align:top}
+        .np-oh-editor-screen .np-oh-item-meta-table th{width:92px;color:#50575e;font-weight:600}
+        .np-oh-editor-screen .np-oh-item-editor{display:grid;gap:8px;max-width:none}
         .np-oh-editor-screen .np-oh-item-editor label{font-size:12px;font-weight:600;color:#50575e}
         .np-oh-editor-screen .np-oh-item-editor-static{padding:8px 10px;background:#f6f7f7;border:1px solid #dcdcde;border-radius:4px}
-        .np-oh-editor-screen .np-oh-item-remove{margin-top:8px}
+        .np-oh-editor-screen .np-oh-item-remove{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;color:#1d2327}
+        .np-oh-editor-screen .np-oh-item-action-note{font-size:12px;color:#646970}
         .np-oh-editor-screen .np-oh-qty-input{width:76px}
+        .np-oh-editor-screen .np-oh-qty-wrap{display:flex;align-items:center;gap:6px;white-space:nowrap}
         .np-oh-editor-screen .np-oh-amount{text-align:right;white-space:nowrap}
         .np-oh-editor-screen .np-oh-items-table td,
         .np-oh-editor-screen .np-oh-items-table th{vertical-align:top}
         .np-oh-editor-screen .np-oh-items-table tfoot th,
         .np-oh-editor-screen .np-oh-items-table tfoot td{background:#fafafa}
         .np-oh-editor-screen .np-oh-items-section + .np-oh-items-section{margin-top:18px}
+        .np-oh-editor-screen .np-oh-items-table .column-thumb{width:68px}
         .np-oh-editor-screen .np-oh-items-table .column-cost,
         .np-oh-editor-screen .np-oh-items-table .column-qty,
         .np-oh-editor-screen .np-oh-items-table .column-total{width:110px}
+        .np-oh-editor-screen .np-oh-items-table .column-actions{width:280px}
         .np-oh-editor-screen .np-oh-woo-items-table th{font-weight:500;color:#646970}
         .np-oh-editor-screen .np-oh-woo-items-table td{padding-top:18px;padding-bottom:18px}
-        .np-oh-editor-screen .np-oh-charge-lines{margin-top:12px;border-top:1px solid #dcdcde}
-        .np-oh-editor-screen .np-oh-charge-line{display:flex;justify-content:space-between;gap:16px;padding:16px 0;border-bottom:1px solid #f0f0f1}
-        .np-oh-editor-screen .np-oh-charge-line-title{font-weight:600}
-        .np-oh-editor-screen .np-oh-charge-line-meta{display:block;margin-top:6px;color:#646970}
+        .np-oh-editor-screen .np-oh-woo-items-table .np-oh-shipping-row td{background:#fcfcfc}
+        .np-oh-editor-screen .np-oh-woo-items-table .np-oh-shipping-row td:first-child{border-left:3px solid #dcdcde}
+        .np-oh-editor-screen .np-oh-shipping-edit-link{font-size:12px}
         .np-oh-editor-screen .np-oh-order-totals-wrap{display:flex;justify-content:flex-end;margin-top:18px}
         .np-oh-editor-screen .np-oh-order-totals{width:100%;max-width:360px;border-top:2px solid #dcdcde;padding-top:10px}
         .np-oh-editor-screen .np-oh-order-total-row{display:flex;justify-content:space-between;gap:18px;padding:6px 0}
@@ -795,7 +803,7 @@ function np_order_hub_render_order_editor_totals_summary($live_order, $currency)
 
     echo '<div class="np-oh-order-totals-wrap">';
     echo '<div class="np-oh-order-totals">';
-    echo '<div class="np-oh-order-total-row"><span>Produktsum:</span><strong>' . esc_html(np_order_hub_format_money($items_subtotal, $currency)) . '</strong></div>';
+    echo '<div class="np-oh-order-total-row"><span>Produktdelsum:</span><strong>' . esc_html(np_order_hub_format_money($items_subtotal, $currency)) . '</strong></div>';
     echo '<div class="np-oh-order-total-row"><span>Frakt:</span><strong>' . esc_html(np_order_hub_format_money($shipping_total !== null ? $shipping_total : 0, $currency)) . '</strong></div>';
     if ($discount_total !== null && abs($discount_total) > 0.0001) {
         echo '<div class="np-oh-order-total-row"><span>Rabatt:</span><strong>-' . esc_html(np_order_hub_format_money(abs($discount_total), $currency)) . '</strong></div>';
@@ -819,23 +827,38 @@ function np_order_hub_render_order_editor_totals_summary($live_order, $currency)
     echo '</div>';
 }
 
+function np_order_hub_get_order_editor_item_image_src($item) {
+    $item = is_array($item) ? $item : array();
+    if (!empty($item['image']) && is_array($item['image']) && !empty($item['image']['src'])) {
+        return esc_url((string) $item['image']['src']);
+    }
+    return '';
+}
+
+function np_order_hub_render_order_editor_item_thumb($item, $type = 'product') {
+    $image_src = np_order_hub_get_order_editor_item_image_src($item);
+    $type = $type === 'shipping' ? 'shipping' : 'product';
+
+    echo '<div class="np-oh-item-thumb' . ($type === 'shipping' ? ' is-shipping' : '') . '">';
+    if ($image_src !== '') {
+        echo '<img src="' . $image_src . '" alt="" />';
+    } elseif ($type === 'shipping') {
+        echo '<span class="dashicons dashicons-cart" aria-hidden="true"></span>';
+    } else {
+        echo '<span class="dashicons dashicons-format-image" aria-hidden="true"></span>';
+    }
+    echo '</div>';
+}
+
 function np_order_hub_render_order_editor_item_summary($item) {
     $item = is_array($item) ? $item : array();
     $name = isset($item['name']) ? (string) $item['name'] : 'Item';
     $sku = trim((string) ($item['sku'] ?? ''));
     $parent_name = trim((string) ($item['parent_name'] ?? ''));
     $variation_id = absint($item['variation_id'] ?? 0);
-    $image_src = '';
-    if (!empty($item['image']) && is_array($item['image']) && !empty($item['image']['src'])) {
-        $image_src = esc_url((string) $item['image']['src']);
-    }
     $meta_map = np_order_hub_get_order_editor_item_meta_map($item);
     $title = $parent_name !== '' ? $parent_name : $name;
 
-    echo '<div class="np-oh-item-summary">';
-    if ($image_src !== '') {
-        echo '<div class="np-oh-item-thumb"><img src="' . $image_src . '" alt="" /></div>';
-    }
     echo '<div class="np-oh-item-copy">';
     echo '<span class="np-oh-item-title">' . esc_html($title) . '</span>';
     if ($sku !== '') {
@@ -845,13 +868,12 @@ function np_order_hub_render_order_editor_item_summary($item) {
         echo '<div class="np-oh-item-detail"><strong>Variant-ID:</strong> ' . esc_html((string) $variation_id) . '</div>';
     }
     if (!empty($meta_map)) {
-        echo '<ul class="np-oh-item-meta">';
+        echo '<table class="np-oh-item-meta-table"><tbody>';
         foreach ($meta_map as $meta_key => $meta_value) {
-            echo '<li><strong>' . esc_html($meta_key) . ':</strong> ' . esc_html($meta_value) . '</li>';
+            echo '<tr><th scope="row">' . esc_html($meta_key) . ':</th><td>' . esc_html($meta_value) . '</td></tr>';
         }
-        echo '</ul>';
+        echo '</tbody></table>';
     }
-    echo '</div>';
     echo '</div>';
 }
 
@@ -937,8 +959,44 @@ function np_order_hub_render_order_editor_item_selector($item, $item_id) {
         }
         echo '</select>';
     }
+    echo '<div class="np-oh-item-action-note">Endringen lagres når du klikker Lagre varelinjer.</div>';
     echo '<label class="np-oh-item-remove"><input type="checkbox" name="line_items[' . esc_attr((string) $item_id) . '][remove]" value="1" /> Fjern varelinje</label>';
     echo '</div>';
+}
+
+function np_order_hub_render_order_editor_shipping_row($shipping_line, $currency) {
+    $shipping_line = is_array($shipping_line) ? $shipping_line : array();
+    $currency = (string) $currency;
+    $shipping_total_value = np_order_hub_parse_numeric_value($shipping_line['total'] ?? null);
+    $shipping_meta_lines = np_order_hub_format_meta_lines($shipping_line['meta_data'] ?? array());
+    $title = trim((string) ($shipping_line['method_title'] ?? 'Frakt'));
+
+    echo '<tr class="np-oh-shipping-row">';
+    echo '<td class="column-thumb"><div class="np-oh-item-thumb-cell">';
+    np_order_hub_render_order_editor_item_thumb(array(), 'shipping');
+    echo '</div></td>';
+    echo '<td>';
+    echo '<div class="np-oh-item-copy">';
+    echo '<span class="np-oh-item-title">' . esc_html($title) . '</span>';
+    if (!empty($shipping_meta_lines)) {
+        echo '<table class="np-oh-item-meta-table"><tbody>';
+        foreach ($shipping_meta_lines as $meta_line) {
+            $parts = explode(': ', (string) $meta_line, 2);
+            if (count($parts) === 2) {
+                echo '<tr><th scope="row">' . esc_html($parts[0]) . ':</th><td>' . esc_html($parts[1]) . '</td></tr>';
+            } else {
+                echo '<tr><td colspan="2">' . esc_html((string) $meta_line) . '</td></tr>';
+            }
+        }
+        echo '</tbody></table>';
+    }
+    echo '</div>';
+    echo '</td>';
+    echo '<td class="np-oh-amount"></td>';
+    echo '<td></td>';
+    echo '<td class="np-oh-amount">' . esc_html(np_order_hub_format_money($shipping_total_value !== null ? $shipping_total_value : 0, $currency)) . '</td>';
+    echo '<td><a class="np-oh-shipping-edit-link" href="#np-oh-advanced-edit">Rediger frakt og gebyrer</a></td>';
+    echo '</tr>';
 }
 
 function np_order_hub_format_order_editor_search_result_label($result, $currency) {
@@ -1782,7 +1840,7 @@ function np_order_hub_order_details_page() {
         wp_nonce_field('np_order_hub_update_line_items');
         echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
         echo '<table class="widefat striped np-oh-items-table np-oh-woo-items-table">';
-        echo '<thead><tr><th>Produkt</th><th class="column-cost np-oh-amount">Pris</th><th class="column-qty">Antall</th><th class="column-total np-oh-amount">Totalt</th></tr></thead><tbody>';
+        echo '<thead><tr><th class="column-thumb"></th><th>Produkt</th><th class="column-cost np-oh-amount">Pris</th><th class="column-qty">Antall</th><th class="column-total np-oh-amount">Totalt</th><th class="column-actions"></th></tr></thead><tbody>';
         foreach ($line_items as $item) {
             if (!is_array($item)) {
                 continue;
@@ -1796,14 +1854,27 @@ function np_order_hub_order_details_page() {
             $total_value = is_numeric($total_raw) ? (float) $total_raw : 0.0;
             $unit_cost = $qty > 0 ? ($total_value / $qty) : $total_value;
             echo '<tr>';
+            echo '<td class="column-thumb"><div class="np-oh-item-thumb-cell">';
+            np_order_hub_render_order_editor_item_thumb($item);
+            echo '</div></td>';
             echo '<td>';
             np_order_hub_render_order_editor_item_summary($item);
-            np_order_hub_render_order_editor_item_selector($item, $item_id);
             echo '</td>';
             echo '<td class="np-oh-amount">' . esc_html(np_order_hub_format_money($unit_cost, $currency)) . '</td>';
-            echo '<td><input class="np-oh-qty-input" type="number" min="1" name="line_items[' . esc_attr((string) $item_id) . '][quantity]" value="' . esc_attr((string) max(1, $qty)) . '" /></td>';
+            echo '<td><div class="np-oh-qty-wrap"><span>&times;</span><input class="np-oh-qty-input" type="number" min="1" name="line_items[' . esc_attr((string) $item_id) . '][quantity]" value="' . esc_attr((string) max(1, $qty)) . '" /></div></td>';
             echo '<td class="np-oh-amount">' . esc_html(np_order_hub_format_money($total_value, $currency)) . '</td>';
+            echo '<td class="column-actions">';
+            np_order_hub_render_order_editor_item_selector($item, $item_id);
+            echo '</td>';
             echo '</tr>';
+        }
+        if (!empty($shipping_lines)) {
+            foreach ($shipping_lines as $shipping_line) {
+                if (!is_array($shipping_line)) {
+                    continue;
+                }
+                np_order_hub_render_order_editor_shipping_row($shipping_line, $currency);
+            }
         }
         echo '</tbody></table>';
         echo '<p><button class="button button-primary" type="submit" name="np_order_hub_update_line_items" value="1">Lagre varelinjer</button></p>';
@@ -1846,32 +1917,9 @@ function np_order_hub_order_details_page() {
     echo '</form>';
     echo '</div>';
 
-    if (!empty($shipping_lines)) {
-        echo '<div class="np-oh-charge-lines">';
-        foreach ($shipping_lines as $shipping_line) {
-            if (!is_array($shipping_line)) {
-                continue;
-            }
-            $shipping_total_value = np_order_hub_parse_numeric_value($shipping_line['total'] ?? null);
-            $shipping_meta_lines = np_order_hub_format_meta_lines($shipping_line['meta_data'] ?? array());
-            echo '<div class="np-oh-charge-line">';
-            echo '<div>';
-            echo '<span class="np-oh-charge-line-title">' . esc_html((string) ($shipping_line['method_title'] ?? 'Frakt')) . '</span>';
-            if (!empty($shipping_meta_lines)) {
-                foreach ($shipping_meta_lines as $meta_line) {
-                    echo '<span class="np-oh-charge-line-meta">' . esc_html($meta_line) . '</span>';
-                }
-            }
-            echo '</div>';
-            echo '<strong>' . esc_html(np_order_hub_format_money($shipping_total_value !== null ? $shipping_total_value : 0, $currency)) . '</strong>';
-            echo '</div>';
-        }
-        echo '</div>';
-    }
-
     np_order_hub_render_order_editor_totals_summary($live_order, $currency);
 
-    echo '<details class="np-oh-advanced-edit">';
+    echo '<details class="np-oh-advanced-edit" id="np-oh-advanced-edit">';
     echo '<summary>Rediger frakt og gebyrer</summary>';
     echo '<div class="np-oh-items-section">';
     echo '<div class="np-oh-two-col">';
