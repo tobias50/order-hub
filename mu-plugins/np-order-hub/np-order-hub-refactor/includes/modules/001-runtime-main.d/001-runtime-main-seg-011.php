@@ -43,6 +43,31 @@ function np_order_hub_is_delete_payload($event, $topic, $data) {
     return false;
 }
 
+function np_order_hub_datetime_gmt_to_timestamp($value) {
+    $value = trim((string) $value);
+    if ($value === '' || $value === '0000-00-00 00:00:00') {
+        return 0;
+    }
+
+    $timestamp = strtotime($value . ' UTC');
+    if ($timestamp === false) {
+        $timestamp = strtotime($value);
+    }
+
+    return $timestamp === false ? 0 : (int) $timestamp;
+}
+
+function np_order_hub_is_stale_order_update($incoming_modified_gmt, $existing_modified_gmt) {
+    $incoming_ts = np_order_hub_datetime_gmt_to_timestamp($incoming_modified_gmt);
+    $existing_ts = np_order_hub_datetime_gmt_to_timestamp($existing_modified_gmt);
+
+    if ($incoming_ts < 1 || $existing_ts < 1) {
+        return false;
+    }
+
+    return $incoming_ts < $existing_ts;
+}
+
 function np_order_hub_handle_webhook(WP_REST_Request $request) {
     $body = $request->get_body();
     $signature = (string) $request->get_header('X-WC-Webhook-Signature');
@@ -157,7 +182,7 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
 
     $existing = $wpdb->get_row(
         $wpdb->prepare(
-            "SELECT id, payload FROM $table WHERE store_key = %s AND order_id = %d",
+            "SELECT id, payload, date_modified_gmt FROM $table WHERE store_key = %s AND order_id = %d",
             $store['key'],
             $order_id
         ),
@@ -175,6 +200,25 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
     $previous_status = '';
     if (!empty($existing_payload['status'])) {
         $previous_status = sanitize_key((string) $existing_payload['status']);
+    }
+    $existing_date_modified_gmt = isset($existing['date_modified_gmt']) ? trim((string) $existing['date_modified_gmt']) : '';
+    if ($existing_date_modified_gmt === '' && !empty($existing_payload['date_modified_gmt'])) {
+        $existing_date_modified_gmt = np_order_hub_parse_datetime_gmt(
+            $existing_payload['date_modified_gmt'] ?? '',
+            $existing_payload['date_modified'] ?? ''
+        );
+    }
+    if ($existing_id && np_order_hub_is_stale_order_update($date_modified_gmt, $existing_date_modified_gmt)) {
+        np_order_hub_log('webhook_stale_ignored', array(
+            'store_key' => $store['key'],
+            'order_id' => $order_id,
+            'topic' => $topic,
+            'incoming_status' => $status,
+            'existing_status' => $previous_status,
+            'incoming_date_modified_gmt' => $date_modified_gmt,
+            'existing_date_modified_gmt' => $existing_date_modified_gmt,
+        ));
+        return new WP_REST_Response(array('status' => 'stale_ignored'), 200);
     }
     $store_bucket = np_order_hub_get_active_store_delivery_bucket($store);
     // Delivery bucket styres kun fra hubens butikk-innstillinger.
@@ -225,8 +269,8 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
             )));
             return new WP_REST_Response(array('error' => 'db_update_failed'), 500);
         }
-        if ($status === 'processing' && $previous_status !== 'processing') {
-            np_order_hub_maybe_notify_new_order($store, $order_number, $order_id, $status, $total, $currency, $is_special_order);
+        if ($status !== $previous_status) {
+            np_order_hub_try_notify_new_order($store, $order_number, $order_id, $status, $total, $currency, $is_special_order, $previous_status);
         }
     } else {
         $record['created_at_gmt'] = $now_gmt;
@@ -240,7 +284,7 @@ function np_order_hub_handle_webhook(WP_REST_Request $request) {
             )));
             return new WP_REST_Response(array('error' => 'db_insert_failed'), 500);
         }
-        np_order_hub_maybe_notify_new_order($store, $order_number, $order_id, $status, $total, $currency, $is_special_order);
+        np_order_hub_try_notify_new_order($store, $order_number, $order_id, $status, $total, $currency, $is_special_order);
     }
 
     $record['id'] = $existing_id ? $existing_id : (int) $wpdb->insert_id;

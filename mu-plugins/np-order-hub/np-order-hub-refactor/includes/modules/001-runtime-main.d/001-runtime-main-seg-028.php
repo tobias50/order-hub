@@ -872,6 +872,13 @@ function np_order_hub_backfill_processing_orders($store_filter = '', $max_per_st
                     if (!empty($existing_payload['np_bytte_storrelse_source_order']) && empty($data['np_bytte_storrelse_source_order'])) {
                         $data['np_bytte_storrelse_source_order'] = (int) $existing_payload['np_bytte_storrelse_source_order'];
                     }
+                    $previous_status = '';
+                    if (!empty($existing_payload['status'])) {
+                        $previous_status = sanitize_key((string) $existing_payload['status']);
+                    }
+                    $is_reklamasjon_order = !empty($data['np_reklamasjon']) || !empty($data['np_reklamasjon_source_order']) || $status === 'reklamasjon';
+                    $is_bytte_storrelse_order = !empty($data['np_bytte_storrelse']) || !empty($data['np_bytte_storrelse_source_order']) || $status === 'bytte-storrelse';
+                    $is_special_order = $is_reklamasjon_order || $is_bytte_storrelse_order;
 
                     $record = array(
                         'store_key' => $store_key,
@@ -909,6 +916,16 @@ function np_order_hub_backfill_processing_orders($store_filter = '', $max_per_st
                     }
 
                     $record['id'] = $existing_id > 0 ? $existing_id : (int) $wpdb->insert_id;
+                    np_order_hub_try_notify_new_order(
+                        $store,
+                        $order_number,
+                        $order_id,
+                        $status,
+                        (float) $total,
+                        $currency,
+                        $is_special_order,
+                        $previous_status
+                    );
                     np_order_hub_print_queue_queue_order($store, $record, 'print-backfill');
                 }
 
@@ -1073,6 +1090,7 @@ function np_order_hub_sync_order_statuses($limit = 250) {
         );
 
         $update = array();
+        $previous_status = sanitize_key((string) ($record['status'] ?? ''));
         if ($remote_status !== '' && $remote_status !== sanitize_key((string) ($record['status'] ?? ''))) {
             $update['status'] = $remote_status;
         }
@@ -1143,6 +1161,10 @@ function np_order_hub_sync_order_statuses($limit = 250) {
             $update['payload'] = wp_json_encode($payload);
         }
 
+        $is_reklamasjon_order = !empty($payload['np_reklamasjon']) || !empty($payload['np_reklamasjon_source_order']) || $remote_status === 'reklamasjon';
+        $is_bytte_storrelse_order = !empty($payload['np_bytte_storrelse']) || !empty($payload['np_bytte_storrelse_source_order']) || $remote_status === 'bytte-storrelse';
+        $is_special_order = $is_reklamasjon_order || $is_bytte_storrelse_order;
+
         if (empty($update)) {
             continue;
         }
@@ -1153,6 +1175,16 @@ function np_order_hub_sync_order_statuses($limit = 250) {
             $stats['other_errors']++;
         } else {
             $stats['updated']++;
+            np_order_hub_try_notify_new_order(
+                $store,
+                $remote_order_number !== '' ? $remote_order_number : (string) ($record['order_number'] ?? $order_id),
+                $order_id,
+                $remote_status,
+                (float) $remote_total,
+                $remote_currency !== '' ? $remote_currency : (string) ($record['currency'] ?? ''),
+                $is_special_order,
+                $previous_status
+            );
         }
     }
 
