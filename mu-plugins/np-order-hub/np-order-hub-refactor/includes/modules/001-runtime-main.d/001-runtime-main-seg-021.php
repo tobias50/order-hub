@@ -55,7 +55,6 @@ function np_order_hub_help_scout_create_conversation($settings, $customer, $subj
 function np_order_hub_help_scout_send_reply($settings, $conversation_id, $message, $status, $customer = array()) {
     $payload = array(
         'text' => $message,
-        'type' => 'reply',
         'draft' => false,
     );
     if (is_array($customer) && !empty($customer['id'])) {
@@ -67,10 +66,12 @@ function np_order_hub_help_scout_send_reply($settings, $conversation_id, $messag
             'email' => (string) $customer['email'],
         );
     }
+    $status = sanitize_key((string) $status);
+    if (in_array($status, array('active', 'pending', 'closed', 'open', 'spam', 'inbox_predefined'), true)) {
+        $payload['status'] = $status;
+    }
     if (!empty($settings['user_id'])) {
-        $payload['user'] = array(
-            'id' => (int) $settings['user_id'],
-        );
+        $payload['user'] = (int) $settings['user_id'];
     }
     return np_order_hub_help_scout_request(
         $settings,
@@ -95,11 +96,9 @@ function np_order_hub_help_scout_update_conversation_status($settings, $conversa
         'PATCH',
         'conversations/' . $conversation_id,
         array(
-            array(
-                'op' => 'replace',
-                'path' => '/status',
-                'value' => $status,
-            ),
+            'op' => 'replace',
+            'path' => '/status',
+            'value' => $status,
         )
     );
 }

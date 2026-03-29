@@ -399,11 +399,11 @@ function np_order_hub_render_order_editor_styles() {
             max-width:none!important;
             min-width:0!important;
         }
-        .np-oh-editor-screen .np-oh-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px;margin:0!important;align-items:start}
+        .np-oh-editor-screen .np-oh-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;grid-template-areas:"main sidebar";gap:20px;margin:0!important;align-items:start}
         .np-oh-editor-screen .np-oh-sidebar-column,
         .np-oh-editor-screen .np-oh-main-column{float:none!important;width:auto!important;margin:0!important}
-        .np-oh-editor-screen .np-oh-sidebar-column{grid-column:2;width:280px!important;max-width:280px}
-        .np-oh-editor-screen .np-oh-main-column{grid-column:1;min-width:0}
+        .np-oh-editor-screen .np-oh-sidebar-column{grid-area:sidebar;width:280px!important;max-width:280px;min-width:0}
+        .np-oh-editor-screen .np-oh-main-column{grid-area:main;min-width:0}
         .np-oh-editor-screen .np-oh-sidebar-actions{width:100%}
         .np-oh-editor-screen .postbox{margin:0 0 16px}
         .np-oh-editor-screen .postbox .hndle{margin:0;padding:11px 12px;border-bottom:1px solid #ccd0d4;font-size:13px;font-weight:600}
@@ -453,7 +453,7 @@ function np_order_hub_render_order_editor_styles() {
         .np-oh-editor-screen .np-oh-case-card .description{display:block;margin-top:2px}
         .np-oh-editor-screen .np-oh-case-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
         @media (max-width: 1080px){
-            .np-oh-editor-screen .np-oh-layout{grid-template-columns:1fr}
+            .np-oh-editor-screen .np-oh-layout{grid-template-columns:1fr;grid-template-areas:"sidebar" "main"}
             .np-oh-editor-screen .np-oh-sidebar-column,
             .np-oh-editor-screen .np-oh-main-column{grid-column:auto;width:100%!important;max-width:none}
         }
@@ -1104,6 +1104,7 @@ function np_order_hub_order_details_page() {
     echo '<input type="hidden" name="record_id" value="' . esc_attr((string) $record['id']) . '" />';
     echo '<button class="button-link-delete" type="submit" name="np_order_hub_delete_record" value="1" onclick="return confirm(\'Remove this order from the hub?\');">Delete from hub</button>';
     echo '</form>';
+    echo '</div>';
     echo '</div>';
     echo '</div>';
 

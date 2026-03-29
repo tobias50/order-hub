@@ -15,14 +15,25 @@ function np_order_hub_get_record($record_id) {
 
 function np_order_hub_help_scout_case_status_options() {
     return array(
-        'active' => 'Active',
-        'pending' => 'Pending',
-        'closed' => 'Closed',
+        'active' => 'Aktiv',
+        'closed' => 'Lukket',
     );
 }
 
-function np_order_hub_help_scout_case_status_label($status) {
+function np_order_hub_help_scout_normalize_case_status($status) {
     $status = sanitize_key((string) $status);
+    if ($status === 'closed') {
+        return 'closed';
+    }
+    if (in_array($status, array('active', 'pending'), true)) {
+        return 'active';
+    }
+
+    return $status !== '' ? $status : 'active';
+}
+
+function np_order_hub_help_scout_case_status_label($status) {
+    $status = np_order_hub_help_scout_normalize_case_status($status);
     $options = np_order_hub_help_scout_case_status_options();
     return isset($options[$status]) ? $options[$status] : ucfirst($status);
 }
@@ -250,6 +261,7 @@ function np_order_hub_help_scout_upsert_local_case($conversation, $matches = arr
     $web_url = np_order_hub_help_scout_case_web_url($conversation);
     $preview = trim((string) ($conversation['preview'] ?? ''));
     $remote_status = sanitize_key((string) ($conversation['status'] ?? ''));
+    $is_closed_remote = np_order_hub_help_scout_normalize_case_status($remote_status) === 'closed';
     $mailbox_id = isset($conversation['mailboxId']) ? absint($conversation['mailboxId']) : 0;
     $conversation_number = isset($conversation['number']) ? absint($conversation['number']) : 0;
     $subject = sanitize_text_field((string) ($conversation['subject'] ?? ''));
@@ -292,6 +304,7 @@ function np_order_hub_help_scout_upsert_local_case($conversation, $matches = arr
         'last_customer_thread_at_gmt' => $last_customer_thread_at,
         'last_synced_gmt' => $now_gmt,
         'updated_at_gmt' => $now_gmt,
+        'closed_in_help_scout' => $is_closed_remote ? 1 : 0,
         'payload' => wp_json_encode($conversation),
     );
 
@@ -304,7 +317,6 @@ function np_order_hub_help_scout_upsert_local_case($conversation, $matches = arr
         $case_id = (int) $existing['id'];
     } else {
         $case_data['imported_at_gmt'] = $now_gmt;
-        $case_data['closed_in_help_scout'] = 0;
         $wpdb->insert($cases_table, $case_data);
         $case_id = (int) $wpdb->insert_id;
     }
@@ -387,6 +399,36 @@ function np_order_hub_help_scout_mark_case_closed_in_remote($conversation_id, $c
         array('%d', '%s', '%s'),
         array('%d')
     );
+}
+
+function np_order_hub_help_scout_set_case_status($case, $status) {
+    $status = np_order_hub_help_scout_normalize_case_status($status);
+    if (!in_array($status, array('active', 'closed'), true)) {
+        return new WP_Error('invalid_help_scout_case_status', 'Invalid Help Scout case status.');
+    }
+
+    if (!is_array($case)) {
+        $case = np_order_hub_help_scout_get_case(absint($case));
+    }
+    if (empty($case) || !is_array($case)) {
+        return new WP_Error('missing_help_scout_case', 'Help Scout case not found.');
+    }
+
+    $conversation_id = isset($case['conversation_id']) ? absint($case['conversation_id']) : 0;
+    if ($conversation_id < 1) {
+        return new WP_Error('missing_help_scout_conversation', 'Help Scout conversation ID missing.');
+    }
+
+    $settings = np_order_hub_get_help_scout_settings();
+    $result = np_order_hub_help_scout_update_conversation_status($settings, $conversation_id, $status);
+    if (is_wp_error($result)) {
+        return $result;
+    }
+
+    np_order_hub_help_scout_mark_case_closed_in_remote($conversation_id, $status === 'closed');
+    $updated_case = np_order_hub_help_scout_get_case_by_conversation_id($conversation_id);
+
+    return is_array($updated_case) ? $updated_case : $case;
 }
 
 function np_order_hub_help_scout_get_case($case_id) {
