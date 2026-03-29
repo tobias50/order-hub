@@ -1,4 +1,24 @@
 <?php
+function np_order_hub_set_last_pushover_result($ok, $code = '', $message = '') {
+    $GLOBALS['np_order_hub_last_pushover_result'] = array(
+        'ok' => !empty($ok),
+        'code' => sanitize_key((string) $code),
+        'message' => sanitize_text_field((string) $message),
+    );
+}
+
+function np_order_hub_get_last_pushover_result() {
+    $result = isset($GLOBALS['np_order_hub_last_pushover_result']) && is_array($GLOBALS['np_order_hub_last_pushover_result'])
+        ? $GLOBALS['np_order_hub_last_pushover_result']
+        : array();
+
+    return wp_parse_args($result, array(
+        'ok' => false,
+        'code' => '',
+        'message' => '',
+    ));
+}
+
 function np_order_hub_log($message, $context = array()) {
     if (!is_array($context)) {
         $context = array('value' => $context);
@@ -24,9 +44,12 @@ function np_order_hub_send_pushover_message($title, $message, $context = array()
         $context = array('value' => $context);
     }
 
+    np_order_hub_set_last_pushover_result(false, '', '');
+
     $settings = np_order_hub_get_pushover_settings();
     if (empty($settings['enabled']) || $settings['user'] === '' || $settings['token'] === '') {
         np_order_hub_log('pushover_skipped_missing_config', $context);
+        np_order_hub_set_last_pushover_result(false, 'missing_config', 'Missing Pushover config.');
         return false;
     }
 
@@ -62,6 +85,7 @@ function np_order_hub_send_pushover_message($title, $message, $context = array()
         np_order_hub_log('pushover_failed_http', array_merge($context, array(
             'error' => $response->get_error_message(),
         )));
+        np_order_hub_set_last_pushover_result(false, 'http_error', $response->get_error_message());
         return false;
     }
 
@@ -71,11 +95,19 @@ function np_order_hub_send_pushover_message($title, $message, $context = array()
     $api_status = is_array($decoded) && isset($decoded['status']) ? (int) $decoded['status'] : 0;
 
     if ($code < 200 || $code >= 300 || $api_status !== 1) {
+        $error_message = '';
+        if (is_array($decoded) && !empty($decoded['errors']) && is_array($decoded['errors'])) {
+            $error_message = implode('; ', array_map('strval', $decoded['errors']));
+        }
+        if ($error_message === '') {
+            $error_message = is_array($decoded) ? wp_json_encode($decoded) : substr($response_body, 0, 500);
+        }
         np_order_hub_log('pushover_failed_response', array_merge($context, array(
             'http_code' => $code,
             'api_status' => $api_status,
             'response' => is_array($decoded) ? $decoded : substr($response_body, 0, 500),
         )));
+        np_order_hub_set_last_pushover_result(false, 'api_response', $error_message);
         return false;
     }
 
@@ -83,6 +115,11 @@ function np_order_hub_send_pushover_message($title, $message, $context = array()
         'http_code' => $code,
         'request_id' => is_array($decoded) && !empty($decoded['request']) ? (string) $decoded['request'] : '',
     )));
+    np_order_hub_set_last_pushover_result(
+        true,
+        'sent',
+        is_array($decoded) && !empty($decoded['request']) ? (string) $decoded['request'] : ''
+    );
 
     return true;
 }

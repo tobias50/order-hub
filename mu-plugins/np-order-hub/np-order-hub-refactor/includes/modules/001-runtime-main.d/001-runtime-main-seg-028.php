@@ -26,6 +26,12 @@ if (!defined('NP_ORDER_HUB_PROCESSING_BACKFILL_EVENT')) {
 if (!defined('NP_ORDER_HUB_PROCESSING_BACKFILL_MAX_PER_STORE')) {
     define('NP_ORDER_HUB_PROCESSING_BACKFILL_MAX_PER_STORE', 100);
 }
+if (!defined('NP_ORDER_HUB_PROCESSING_NOTIFY_RETRY_EVENT')) {
+    define('NP_ORDER_HUB_PROCESSING_NOTIFY_RETRY_EVENT', 'np_order_hub_retry_processing_notifications_cron');
+}
+if (!defined('NP_ORDER_HUB_PROCESSING_NOTIFY_RETRY_LIMIT')) {
+    define('NP_ORDER_HUB_PROCESSING_NOTIFY_RETRY_LIMIT', 25);
+}
 
 add_filter('cron_schedules', 'np_order_hub_deleted_sync_cron_schedules');
 add_action('init', 'np_order_hub_deleted_sync_schedule_event');
@@ -34,6 +40,8 @@ add_action('init', 'np_order_hub_status_sync_schedule_event');
 add_action(NP_ORDER_HUB_STATUS_SYNC_EVENT, 'np_order_hub_status_sync_run_cron');
 add_action('init', 'np_order_hub_processing_backfill_schedule_event');
 add_action(NP_ORDER_HUB_PROCESSING_BACKFILL_EVENT, 'np_order_hub_processing_backfill_run_cron');
+add_action('init', 'np_order_hub_processing_notification_retry_schedule_event');
+add_action(NP_ORDER_HUB_PROCESSING_NOTIFY_RETRY_EVENT, 'np_order_hub_processing_notification_retry_run_cron');
 
 function np_order_hub_deleted_sync_cron_schedules($schedules) {
     if (!is_array($schedules)) {
@@ -85,6 +93,19 @@ function np_order_hub_processing_backfill_schedule_event() {
 
 function np_order_hub_processing_backfill_run_cron() {
     np_order_hub_backfill_processing_orders('', NP_ORDER_HUB_PROCESSING_BACKFILL_MAX_PER_STORE);
+}
+
+function np_order_hub_processing_notification_retry_schedule_event() {
+    if (!function_exists('wp_next_scheduled') || !function_exists('wp_schedule_event')) {
+        return;
+    }
+    if (!wp_next_scheduled(NP_ORDER_HUB_PROCESSING_NOTIFY_RETRY_EVENT)) {
+        wp_schedule_event(time() + 45, 'np_order_hub_1min', NP_ORDER_HUB_PROCESSING_NOTIFY_RETRY_EVENT);
+    }
+}
+
+function np_order_hub_processing_notification_retry_run_cron() {
+    np_order_hub_retry_processing_notifications(NP_ORDER_HUB_PROCESSING_NOTIFY_RETRY_LIMIT);
 }
 
 function np_order_hub_wc_response_indicates_missing_order($status_code, $body) {

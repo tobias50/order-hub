@@ -152,6 +152,11 @@ function np_order_hub_activate() {
         total DECIMAL(18,4) NOT NULL DEFAULT 0,
         date_created_gmt DATETIME NULL,
         date_modified_gmt DATETIME NULL,
+        processing_notify_state VARCHAR(20) NOT NULL DEFAULT '',
+        processing_notified_at_gmt DATETIME NULL,
+        processing_notify_attempts INT(10) UNSIGNED NOT NULL DEFAULT 0,
+        processing_notify_last_attempt_gmt DATETIME NULL,
+        processing_notify_last_error TEXT NULL,
         order_admin_url TEXT NULL,
         payload LONGTEXT NULL,
         created_at_gmt DATETIME NOT NULL,
@@ -160,7 +165,8 @@ function np_order_hub_activate() {
         UNIQUE KEY store_order (store_key, order_id),
         KEY store_key (store_key),
         KEY status (status),
-        KEY date_created_gmt (date_created_gmt)
+        KEY date_created_gmt (date_created_gmt),
+        KEY processing_notify_lookup (status, processing_notify_state, processing_notified_at_gmt)
     ) $charset_collate;";
 
 	    $production_sql = "CREATE TABLE $production_table (
@@ -258,6 +264,65 @@ function np_order_hub_activate() {
 
 $np_order_hub_main_file = defined('NP_ORDER_HUB_MAIN_FILE') ? NP_ORDER_HUB_MAIN_FILE : __FILE__;
 register_activation_hook($np_order_hub_main_file, 'np_order_hub_activate');
+
+function np_order_hub_ensure_order_notification_columns() {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    global $wpdb;
+    if (!isset($wpdb) || !($wpdb instanceof wpdb)) {
+        return;
+    }
+
+    $table = np_order_hub_table_name();
+    if ($table === '') {
+        return;
+    }
+
+    $exists = (string) $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+    if ($exists !== $table) {
+        np_order_hub_activate();
+        $exists = (string) $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+        if ($exists !== $table) {
+            return;
+        }
+    }
+
+    $table_sql = str_replace('`', '``', $table);
+    $existing_columns = $wpdb->get_col("SHOW COLUMNS FROM `{$table_sql}`", 0);
+    if (!is_array($existing_columns)) {
+        $existing_columns = array();
+    }
+    $existing_columns = array_map('strval', $existing_columns);
+
+    $columns = array(
+        'processing_notify_state' => "ALTER TABLE `{$table_sql}` ADD COLUMN processing_notify_state VARCHAR(20) NOT NULL DEFAULT '' AFTER date_modified_gmt",
+        'processing_notified_at_gmt' => "ALTER TABLE `{$table_sql}` ADD COLUMN processing_notified_at_gmt DATETIME NULL AFTER processing_notify_state",
+        'processing_notify_attempts' => "ALTER TABLE `{$table_sql}` ADD COLUMN processing_notify_attempts INT(10) UNSIGNED NOT NULL DEFAULT 0 AFTER processing_notified_at_gmt",
+        'processing_notify_last_attempt_gmt' => "ALTER TABLE `{$table_sql}` ADD COLUMN processing_notify_last_attempt_gmt DATETIME NULL AFTER processing_notify_attempts",
+        'processing_notify_last_error' => "ALTER TABLE `{$table_sql}` ADD COLUMN processing_notify_last_error TEXT NULL AFTER processing_notify_last_attempt_gmt",
+    );
+
+    foreach ($columns as $column => $sql) {
+        if (!in_array($column, $existing_columns, true)) {
+            $wpdb->query($sql);
+        }
+    }
+
+    $existing_indexes = $wpdb->get_col("SHOW INDEX FROM `{$table_sql}`", 2);
+    if (!is_array($existing_indexes)) {
+        $existing_indexes = array();
+    }
+    $existing_indexes = array_map('strval', $existing_indexes);
+    if (!in_array('processing_notify_lookup', $existing_indexes, true)) {
+        $wpdb->query("ALTER TABLE `{$table_sql}` ADD KEY processing_notify_lookup (status, processing_notify_state, processing_notified_at_gmt)");
+    }
+}
+
+add_action('init', 'np_order_hub_ensure_order_notification_columns', 1);
 
 function np_order_hub_ensure_production_error_table() {
     static $checked = false;
