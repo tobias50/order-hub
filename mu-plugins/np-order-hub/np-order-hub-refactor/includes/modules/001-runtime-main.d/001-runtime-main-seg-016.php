@@ -212,7 +212,7 @@ function np_order_hub_fetch_store_sales_total($store, $date_to_gmt = '') {
 function np_order_hub_get_revenue_filters() {
     $filters = array(
         'store' => isset($_GET['store']) ? sanitize_key((string) $_GET['store']) : '',
-        'status' => '',
+        'status' => 'processing',
         'search' => '',
         'date_from_raw' => isset($_GET['date_from']) ? sanitize_text_field((string) $_GET['date_from']) : '',
         'date_to_raw' => isset($_GET['date_to']) ? sanitize_text_field((string) $_GET['date_to']) : '',

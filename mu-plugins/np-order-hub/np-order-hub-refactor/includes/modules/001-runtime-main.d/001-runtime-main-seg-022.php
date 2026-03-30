@@ -93,8 +93,8 @@ function np_order_hub_dashboard_page() {
     $delivery_bucket = $page_slug === 'np-order-hub-scheduled' ? NP_ORDER_HUB_DELIVERY_BUCKET_SCHEDULED : 'standard';
     $dashboard_title = $delivery_bucket === NP_ORDER_HUB_DELIVERY_BUCKET_SCHEDULED ? 'Levering til bestemt dato' : 'Levering 3-5 dager';
     $default_status = 'processing';
-    $show_status_filter = true;
-    $show_status_tabs = true;
+    $show_status_filter = false;
+    $show_status_tabs = false;
     $show_reklamasjon = $delivery_bucket !== NP_ORDER_HUB_DELIVERY_BUCKET_SCHEDULED;
 
     $bulk_notice = null;
@@ -287,6 +287,7 @@ function np_order_hub_dashboard_page() {
     }
 
     $filters = np_order_hub_get_dashboard_filters($default_status);
+    $filters['status'] = $default_status;
     $processing_count = np_order_hub_get_processing_count_for_bucket(
         $delivery_bucket,
         isset($filters['store']) ? (string) $filters['store'] : ''

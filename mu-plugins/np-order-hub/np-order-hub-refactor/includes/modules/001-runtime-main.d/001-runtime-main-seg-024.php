@@ -110,7 +110,7 @@ function np_order_hub_revenue_dashboard_shortcode($atts) {
     $range = np_order_hub_get_period_date_range($period_input, $custom_from, $custom_to);
     $filters = array(
         'store' => '',
-        'status' => '',
+        'status' => 'processing',
         'search' => '',
         'date_from_raw' => $range['from'],
         'date_to_raw' => $range['to'],
